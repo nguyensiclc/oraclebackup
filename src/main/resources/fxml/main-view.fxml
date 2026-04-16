@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+
+<BorderPane xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
+            fx:controller="com.oracleexporter.gui.MainController">
+
+    <top>
+        <VBox spacing="10" styleClass="top-pane" BorderPane.alignment="CENTER">
+            <padding>
+                <Insets top="14" right="14" bottom="10" left="14"/>
+            </padding>
+
+            <Label text="OracleSchemaExporter" styleClass="app-title"/>
+
+            <GridPane hgap="10" vgap="10">
+                <columnConstraints>
+                    <ColumnConstraints minWidth="80" halignment="RIGHT"/>
+                    <ColumnConstraints hgrow="ALWAYS" minWidth="140"/>
+                    <ColumnConstraints minWidth="60" halignment="RIGHT"/>
+                    <ColumnConstraints hgrow="ALWAYS" minWidth="140"/>
+                    <ColumnConstraints minWidth="80" halignment="RIGHT"/>
+                    <ColumnConstraints hgrow="ALWAYS" minWidth="140"/>
+                </columnConstraints>
+
+                <Label text="Host" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                <TextField fx:id="hostField" promptText="localhost" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+
+                <Label text="Port" GridPane.rowIndex="0" GridPane.columnIndex="2"/>
+                <TextField fx:id="portField" promptText="1521" GridPane.rowIndex="0" GridPane.columnIndex="3"/>
+
+                <Label text="Service" GridPane.rowIndex="0" GridPane.columnIndex="4"/>
+                <TextField fx:id="serviceField" promptText="ORCLPDB1" GridPane.rowIndex="0" GridPane.columnIndex="5"/>
+
+                <Label text="User" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                <TextField fx:id="userField" promptText="SCOTT" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+
+                <Label text="Password" GridPane.rowIndex="1" GridPane.columnIndex="2"/>
+                <PasswordField fx:id="passwordField" promptText="******" GridPane.rowIndex="1" GridPane.columnIndex="3"/>
+
+                <HBox spacing="10" GridPane.rowIndex="1" GridPane.columnIndex="4" GridPane.columnSpan="2">
+                    <Button fx:id="connectButton" text="Connect" onAction="#onConnect" styleClass="primary"/>
+                    <Button fx:id="disconnectButton" text="Disconnect" onAction="#onDisconnect"/>
+                </HBox>
+
+                <Label text="Export folder" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
+                <HBox spacing="10" GridPane.rowIndex="2" GridPane.columnIndex="1" GridPane.columnSpan="5">
+                    <TextField fx:id="exportFolderField" promptText="Choose a folder to save exports..." editable="false" HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="browseExportFolderButton" text="Browse..." onAction="#onBrowseExportFolder"/>
+                </HBox>
+            </GridPane>
+        </VBox>
+    </top>
+
+    <center>
+        <SplitPane dividerPositions="0.28">
+            <padding>
+                <Insets top="12" right="14" bottom="12" left="14"/>
+            </padding>
+
+            <items>
+                <VBox spacing="10">
+                    <Label text="Tables" styleClass="section-title"/>
+                    <TextField fx:id="tableFilterField" promptText="Filter tables..."/>
+                    <ListView fx:id="tablesList" VBox.vgrow="ALWAYS"/>
+                </VBox>
+
+                <VBox spacing="10">
+                    <HBox spacing="10" alignment="CENTER_LEFT">
+                        <Label text="Preview" styleClass="section-title"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button fx:id="loadPreviewButton" text="Load preview" onAction="#onLoadPreview"/>
+                        <CheckBox fx:id="includeDmlCheck" text="Include data (INSERT)"/>
+                        <Button fx:id="exportButton" text="Export table" onAction="#onExport" styleClass="primary"/>
+                        <Button fx:id="exportAllButton" text="Export ALL" onAction="#onExportAll"/>
+                    </HBox>
+
+                    <TableView fx:id="columnTable" VBox.vgrow="ALWAYS">
+                        <columns>
+                            <TableColumn fx:id="colName" text="Column"/>
+                            <TableColumn fx:id="colType" text="Type"/>
+                            <TableColumn fx:id="colLen" text="Len" maxWidth="80"/>
+                            <TableColumn fx:id="colPrec" text="Prec" maxWidth="80"/>
+                            <TableColumn fx:id="colScale" text="Scale" maxWidth="80"/>
+                            <TableColumn fx:id="colNullable" text="Nullable" maxWidth="110"/>
+                            <TableColumn fx:id="colPk" text="PK" maxWidth="70"/>
+                            <TableColumn fx:id="colComment" text="Comment"/>
+                        </columns>
+                    </TableView>
+                </VBox>
+            </items>
+        </SplitPane>
+    </center>
+
+    <bottom>
+        <HBox spacing="12" alignment="CENTER_LEFT" styleClass="status-bar">
+            <padding>
+                <Insets top="10" right="14" bottom="12" left="14"/>
+            </padding>
+            <ProgressBar fx:id="progressBar" prefWidth="220"/>
+            <Label fx:id="statusLabel" text="Ready."/>
+        </HBox>
+    </bottom>
+
+</BorderPane>
+

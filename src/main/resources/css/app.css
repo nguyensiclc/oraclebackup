@@ -1,0 +1,99 @@
+.root {
+    -fx-font-family: "Segoe UI", "Inter", Arial;
+    -fx-base: #0f172a;
+    -fx-background: #0b1220;
+}
+
+.top-pane {
+    -fx-background-color: linear-gradient(to right, #0b1220, #0f1a33);
+    -fx-border-color: rgba(255,255,255,0.06);
+    -fx-border-width: 0 0 1 0;
+}
+
+.app-title {
+    -fx-text-fill: #e2e8f0;
+    -fx-font-size: 20px;
+    -fx-font-weight: 700;
+}
+
+.section-title {
+    -fx-text-fill: #cbd5e1;
+    -fx-font-size: 14px;
+    -fx-font-weight: 700;
+}
+
+.label {
+    -fx-text-fill: #cbd5e1;
+}
+
+.text-field, .password-field, .combo-box {
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-border-color: rgba(255,255,255,0.12);
+    -fx-background-color: rgba(255,255,255,0.04);
+    -fx-text-fill: #e2e8f0;
+    -fx-prompt-text-fill: rgba(226,232,240,0.55);
+}
+
+.button {
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-border-color: rgba(255,255,255,0.12);
+    -fx-background-color: rgba(255,255,255,0.06);
+    -fx-text-fill: #e2e8f0;
+    -fx-font-weight: 600;
+    -fx-padding: 8 12;
+}
+
+.button.primary {
+    -fx-background-color: #2563eb;
+    -fx-border-color: rgba(255,255,255,0.18);
+}
+
+.table-view {
+    -fx-background-color: rgba(255,255,255,0.03);
+    -fx-border-color: rgba(255,255,255,0.10);
+    -fx-border-radius: 12;
+    -fx-background-radius: 12;
+}
+
+.table-view .column-header-background {
+    -fx-background-color: rgba(255,255,255,0.05);
+    -fx-background-radius: 12 12 0 0;
+}
+
+.table-view .column-header, .table-view .filler {
+    -fx-size: 34px;
+    -fx-border-color: rgba(255,255,255,0.08);
+}
+
+.table-row-cell {
+    -fx-background-color: transparent;
+    -fx-text-background-color: #e2e8f0;
+}
+
+.status-bar {
+    -fx-background-color: rgba(255,255,255,0.03);
+    -fx-border-color: rgba(255,255,255,0.08);
+    -fx-border-width: 1 0 0 0;
+}
+
+.progress-bar {
+    -fx-accent: #22c55e;
+}
+
+.badge {
+    -fx-background-radius: 999;
+    -fx-padding: 2 8;
+    -fx-text-fill: #0b1220;
+    -fx-font-weight: 700;
+}
+
+.badge-green {
+    -fx-background-color: #22c55e;
+}
+
+.badge-gray {
+    -fx-background-color: #94a3b8;
+}
+

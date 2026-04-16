@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.oracleexporter</groupId>
+    <artifactId>OracleSchemaExporter</artifactId>
+    <version>1.0.0</version>
+    <name>OracleSchemaExporter</name>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>21</maven.compiler.release>
+        <javafx.version>21.0.7</javafx.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-fxml</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+
+        <!-- Oracle JDBC driver -->
+        <dependency>
+            <groupId>com.oracle.database.jdbc</groupId>
+            <artifactId>ojdbc11</artifactId>
+            <version>23.8.0.25.04</version>
+        </dependency>
+
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.oracleexporter.gui.OracleSchemaExporterApp</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-maven-plugin</artifactId>
+                <version>0.0.8</version>
+                <configuration>
+                    <mainClass>com.oracleexporter.gui.OracleSchemaExporterApp</mainClass>
+                </configuration>
+            </plugin>
+
+            <!-- Prepare an input folder for jpackage (app jar + dependencies) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.7.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies-for-jpackage</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeScope>runtime</includeScope>
+                            <outputDirectory>${project.build.directory}/jpackage/input/lib</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-app-jar-for-jpackage</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/jpackage/input</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.build.directory}</directory>
+                                    <includes>
+                                        <include>${project.build.finalName}.jar</include>
+                                    </includes>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Create a Windows executable installer/app using the JDK's jpackage -->
+            <plugin>
+                <groupId>org.panteleyev</groupId>
+                <artifactId>jpackage-maven-plugin</artifactId>
+                <version>1.7.4</version>
+                <executions>
+                    <execution>
+                        <id>jpackage-windows</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jpackage</goal>
+                        </goals>
+                        <configuration>
+                            <name>OracleSchemaExporter</name>
+                            <appVersion>${project.version}</appVersion>
+                            <vendor>OracleSchemaExporter</vendor>
+                            <destination>${project.build.directory}/dist</destination>
+                            <input>${project.build.directory}/jpackage/input</input>
+                            <mainJar>${project.build.finalName}.jar</mainJar>
+                            <mainClass>com.oracleexporter.gui.OracleSchemaExporterApp</mainClass>
+                            <!-- Default: portable app-image (no WiX required) -->
+                            <type>APP_IMAGE</type>
+                            <javaOptions>
+                                <javaOption>-Dfile.encoding=UTF-8</javaOption>
+                            </javaOptions>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- Build installer on Windows (requires WiX Toolset in PATH) -->
+        <profile>
+            <id>windows-installer-exe</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.panteleyev</groupId>
+                        <artifactId>jpackage-maven-plugin</artifactId>
+                        <version>1.7.4</version>
+                        <executions>
+                            <execution>
+                                <id>jpackage-windows-exe</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>jpackage</goal>
+                                </goals>
+                                <configuration>
+                                    <name>OracleSchemaExporter</name>
+                                    <appVersion>${project.version}</appVersion>
+                                    <vendor>OracleSchemaExporter</vendor>
+                                    <destination>${project.build.directory}/dist</destination>
+                                    <input>${project.build.directory}/jpackage/input</input>
+                                    <mainJar>${project.build.finalName}.jar</mainJar>
+                                    <mainClass>com.oracleexporter.gui.OracleSchemaExporterApp</mainClass>
+                                    <type>EXE</type>
+                                    <winMenu>true</winMenu>
+                                    <winShortcut>true</winShortcut>
+                                    <winDirChooser>true</winDirChooser>
+                                    <winPerUserInstall>true</winPerUserInstall>
+                                    <javaOptions>
+                                        <javaOption>-Dfile.encoding=UTF-8</javaOption>
+                                    </javaOptions>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>
+

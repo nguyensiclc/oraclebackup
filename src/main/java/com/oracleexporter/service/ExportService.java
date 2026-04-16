@@ -1,0 +1,250 @@
+package com.oracleexporter.service;
+
+import com.oracleexporter.model.ColumnInfo;
+import com.oracleexporter.model.TableInfo;
+
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Clob;
+import java.sql.Timestamp;
+import java.sql.Types;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Locale;
+import java.util.stream.Collectors;
+
+public class ExportService {
+
+    private static final Charset UTF8 = StandardCharsets.UTF_8;
+    private static final DateTimeFormatter DATE_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    public Path exportSql(TableInfo table, Path file) throws IOException {
+        String ddl = toCreateTableSql(table);
+        try (BufferedWriter w = Files.newBufferedWriter(file, UTF8)) {
+            w.write(ddl);
+        }
+        return file;
+    }
+
+    public Path exportDataSql(Connection connection, String tableName, Path file) throws IOException, SQLException {
+        if (connection == null) throw new IllegalArgumentException("connection is null");
+        if (tableName == null || tableName.isBlank()) throw new IllegalArgumentException("tableName is blank");
+
+        String t = tableName.trim().toUpperCase(Locale.ROOT);
+        String sql = "SELECT * FROM " + quoteIdent(t);
+
+        try (BufferedWriter w = Files.newBufferedWriter(file, UTF8);
+             PreparedStatement ps = connection.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+             ResultSet rs = ps.executeQuery()) {
+
+            ps.setFetchSize(1000);
+
+            w.write("-- Data export for table " + quoteIdent(t));
+            w.newLine();
+            w.write("SET DEFINE OFF;");
+            w.newLine();
+            w.newLine();
+
+            ResultSetMetaData md = rs.getMetaData();
+            int colCount = md.getColumnCount();
+
+            String colList = buildQuotedColumnList(md, colCount);
+            String insertPrefix = "INSERT INTO " + quoteIdent(t) + " (" + colList + ") VALUES (";
+
+            long row = 0;
+            while (rs.next()) {
+                w.write(insertPrefix);
+                for (int i = 1; i <= colCount; i++) {
+                    if (i > 1) w.write(", ");
+                    int jdbcType = md.getColumnType(i);
+                    w.write(toSqlLiteral(rs, i, jdbcType));
+                }
+                w.write(");");
+                w.newLine();
+                row++;
+
+                if (row % 500 == 0) {
+                    w.flush();
+                }
+            }
+
+            w.newLine();
+            w.write("COMMIT;");
+            w.newLine();
+        }
+
+        return file;
+    }
+
+    public String toCreateTableSql(TableInfo table) {
+        String tableName = table.getName();
+        List<ColumnInfo> cols = table.getColumns();
+
+        String pkClause = buildPkClause(tableName, cols);
+
+        String body = cols.stream()
+                .map(c -> "  " + quoteIdent(c.getName()) + " " + formatType(c) + (c.isNullable() ? "" : " NOT NULL"))
+                .collect(Collectors.joining(",\n"));
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("CREATE TABLE ").append(quoteIdent(tableName)).append(" (\n");
+        sb.append(body);
+        if (pkClause != null) {
+            sb.append(",\n  ").append(pkClause);
+        }
+        sb.append("\n);\n\n");
+
+        for (ColumnInfo c : cols) {
+            if (c.getComment() != null && !c.getComment().isBlank()) {
+                sb.append("COMMENT ON COLUMN ")
+                        .append(quoteIdent(tableName))
+                        .append(".")
+                        .append(quoteIdent(c.getName()))
+                        .append(" IS '")
+                        .append(escapeSqlString(c.getComment()))
+                        .append("';\n");
+            }
+        }
+        sb.append("\n");
+
+        return sb.toString();
+    }
+
+    private static String buildPkClause(String tableName, List<ColumnInfo> cols) {
+        List<String> pkCols = cols.stream()
+                .filter(ColumnInfo::isPrimaryKey)
+                .map(ColumnInfo::getName)
+                .filter(n -> n != null && !n.isBlank())
+                .map(ExportService::quoteIdent)
+                .toList();
+
+        if (pkCols.isEmpty()) return null;
+        return "CONSTRAINT " + quoteIdent(("PK_" + tableName).toUpperCase(Locale.ROOT)) +
+                " PRIMARY KEY (" + String.join(", ", pkCols) + ")";
+    }
+
+    private static String formatType(ColumnInfo c) {
+        String dt = c.getDataType();
+        if (dt == null) return "";
+        String u = dt.toUpperCase(Locale.ROOT);
+
+        // Common Oracle types formatting
+        if (u.contains("CHAR")) {
+            Integer len = c.getLength();
+            if (len != null && len > 0) return u + "(" + len + ")";
+            return u;
+        }
+
+        if ("NUMBER".equals(u)) {
+            Integer p = c.getPrecision();
+            Integer s = c.getScale();
+            if (p == null) return "NUMBER";
+            if (s == null || s == 0) return "NUMBER(" + p + ")";
+            return "NUMBER(" + p + "," + s + ")";
+        }
+
+        if ("FLOAT".equals(u)) {
+            Integer p = c.getPrecision();
+            if (p != null) return "FLOAT(" + p + ")";
+            return "FLOAT";
+        }
+
+        if ("RAW".equals(u) || "UROWID".equals(u)) {
+            Integer len = c.getLength();
+            if (len != null && len > 0) return u + "(" + len + ")";
+        }
+
+        return u;
+    }
+
+    private static String quoteIdent(String ident) {
+        if (ident == null) return "\"\"";
+        return "\"" + ident.replace("\"", "\"\"") + "\"";
+    }
+
+    private static String escapeSqlString(String s) {
+        return s == null ? "" : s.replace("'", "''");
+    }
+
+    private static String buildQuotedColumnList(ResultSetMetaData md, int colCount) throws SQLException {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 1; i <= colCount; i++) {
+            if (i > 1) sb.append(", ");
+            sb.append(quoteIdent(md.getColumnName(i)));
+        }
+        return sb.toString();
+    }
+
+    private static String toSqlLiteral(ResultSet rs, int index, int jdbcType) throws SQLException, IOException {
+        Object value = rs.getObject(index);
+        if (value == null) return "NULL";
+
+        // Numbers
+        if (value instanceof Number n) {
+            return n.toString();
+        }
+
+        // Boolean (rare in Oracle, but keep safe)
+        if (value instanceof Boolean b) {
+            return b ? "1" : "0";
+        }
+
+        // Date/time
+        if (jdbcType == Types.DATE && value instanceof java.sql.Date d) {
+            LocalDateTime ldt = d.toLocalDate().atStartOfDay();
+            return "TO_DATE('" + DATE_TIME_FMT.format(ldt) + "', 'YYYY-MM-DD HH24:MI:SS')";
+        }
+        if ((jdbcType == Types.TIMESTAMP || jdbcType == Types.TIMESTAMP_WITH_TIMEZONE) && value instanceof Timestamp ts) {
+            LocalDateTime ldt = ts.toLocalDateTime();
+            return "TO_TIMESTAMP('" + DATE_TIME_FMT.format(ldt) + "', 'YYYY-MM-DD HH24:MI:SS')";
+        }
+        if (value instanceof OffsetDateTime odt) {
+            LocalDateTime ldt = odt.toLocalDateTime();
+            return "TO_TIMESTAMP('" + DATE_TIME_FMT.format(ldt) + "', 'YYYY-MM-DD HH24:MI:SS')";
+        }
+        if (value instanceof ZonedDateTime zdt) {
+            LocalDateTime ldt = zdt.toLocalDateTime();
+            return "TO_TIMESTAMP('" + DATE_TIME_FMT.format(ldt) + "', 'YYYY-MM-DD HH24:MI:SS')";
+        }
+
+        // RAW/BLOB -> hextoraw
+        if (jdbcType == Types.BINARY || jdbcType == Types.VARBINARY || jdbcType == Types.LONGVARBINARY || jdbcType == Types.BLOB) {
+            byte[] bytes;
+            if (value instanceof byte[] b) bytes = b;
+            else return "NULL";
+            return "HEXTORAW('" + toHex(bytes) + "')";
+        }
+
+        if (jdbcType == Types.CLOB || value instanceof Clob) {
+            String s = rs.getString(index);
+            return "'" + escapeSqlString(s) + "'";
+        }
+
+        // Default treat as string (VARCHAR2, CHAR, etc.)
+        return "'" + escapeSqlString(rs.getString(index)) + "'";
+    }
+
+    private static String toHex(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return "";
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString().toUpperCase(Locale.ROOT);
+    }
+
+}
+
