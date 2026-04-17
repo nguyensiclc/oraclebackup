@@ -132,13 +132,16 @@
     </center>
 
     <bottom>
-        <HBox spacing="12" alignment="CENTER_LEFT" styleClass="status-bar">
+        <VBox styleClass="status-bar">
             <padding>
                 <Insets top="10" right="14" bottom="12" left="14"/>
             </padding>
-            <ProgressBar fx:id="progressBar" prefWidth="220"/>
-            <Label fx:id="statusLabel" text="Ready."/>
-        </HBox>
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <ProgressBar fx:id="progressBar" prefWidth="220"/>
+                <Label fx:id="statusLabel" text="Ready."/>
+            </HBox>
+            <TextArea fx:id="logArea" promptText="Import/Export log..." prefRowCount="6" wrapText="false" editable="false"/>
+        </VBox>
     </bottom>
 
 </BorderPane>

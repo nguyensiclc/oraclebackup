@@ -27,6 +27,7 @@ import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
@@ -85,6 +86,7 @@ public class MainController {
 
     @FXML private ProgressBar progressBar;
     @FXML private Label statusLabel;
+    @FXML private TextArea logArea;
 
     private final MetadataService metadataService = new MetadataService();
     private final ExportService exportService = new ExportService();
@@ -632,6 +634,8 @@ public class MainController {
 
         operationInProgress = true;
         disableWhileBusy(true);
+        clearLog();
+        appendLog("[IMPORT] Root folder: " + importDir);
 
         Task<Path> task = new Task<>() {
             @Override
@@ -643,7 +647,24 @@ public class MainController {
                 }
 
                 updateMessage("Importing from folder...");
-                importService.importFromExportFolder(connection, importDir);
+                boolean prevAutoCommit = true;
+                try {
+                    prevAutoCommit = connection.getAutoCommit();
+                } catch (SQLException ignored) {}
+
+                try {
+                    try {
+                        connection.setAutoCommit(false);
+                    } catch (SQLException ignored) {}
+                    importService.importFromExportFolder(connection, importDir, MainController.this::appendLog);
+                    try {
+                        connection.commit();
+                    } catch (SQLException ignored) {}
+                } finally {
+                    try {
+                        connection.setAutoCommit(prevAutoCommit);
+                    } catch (SQLException ignored) {}
+                }
 
                 return importDir;
             }
@@ -867,6 +888,21 @@ public class MainController {
             statusLabel.setText(msg);
             progressBar.progressProperty().unbind();
             progressBar.setProgress(0);
+        });
+    }
+
+    private void appendLog(String line) {
+        if (line == null) return;
+        Platform.runLater(() -> {
+            if (logArea == null) return;
+            String l = line.endsWith("\n") ? line : (line + "\n");
+            logArea.appendText(l);
+        });
+    }
+
+    private void clearLog() {
+        Platform.runLater(() -> {
+            if (logArea != null) logArea.clear();
         });
     }
 
