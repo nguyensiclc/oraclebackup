@@ -1,6 +1,8 @@
 package com.oracleexporter.gui;
 
 import com.oracleexporter.model.ColumnInfo;
+import com.oracleexporter.model.DbObject;
+import com.oracleexporter.model.DbObjectType;
 import com.oracleexporter.model.TableInfo;
 import com.oracleexporter.service.ExportService;
 import com.oracleexporter.service.MetadataService;
@@ -37,6 +39,8 @@ public class MainController {
     private static final String CFG_SERVICE = "db.service";
     private static final String CFG_USER = "db.user";
     private static final String CFG_EXPORT_DIR = "export.baseDir";
+    private static final String CFG_DATA_MAX_ROWS = "export.data.maxRows";
+    private static final String CFG_DATA_ALL_ROWS = "export.data.allRows";
 
     private static final DateTimeFormatter EXPORT_TS_FMT = DateTimeFormatter.ofPattern("dd_MM_yyyy_HH_mm");
 
@@ -51,7 +55,7 @@ public class MainController {
     @FXML private TextField exportFolderField;
     @FXML private Button browseExportFolderButton;
     @FXML private TextField tableFilterField;
-    @FXML private ListView<String> tablesList;
+    @FXML private ListView<DbObject> tablesList;
 
     @FXML private TableView<ColumnInfo> columnTable;
     @FXML private TableColumn<ColumnInfo, String> colName;
@@ -64,6 +68,8 @@ public class MainController {
     @FXML private TableColumn<ColumnInfo, String> colComment;
 
     @FXML private CheckBox includeDmlCheck;
+    @FXML private Spinner<Integer> maxDataRowsSpinner;
+    @FXML private CheckBox exportAllDataCheck;
     @FXML private Button loadPreviewButton;
     @FXML private Button exportButton;
     @FXML private Button exportAllButton;
@@ -76,19 +82,36 @@ public class MainController {
 
     private Connection connection;
     private TableInfo currentTable;
-    private String selectedTableName;
+    private DbObject selectedObject;
     private String connectedSchema;
     private Path exportBaseDir;
     private boolean operationInProgress;
-    private final ObservableList<String> allTables = FXCollections.observableArrayList();
-    private FilteredList<String> filteredTables;
-    private final Properties config = ConfigUtil.load();
+    private final ObservableList<DbObject> allObjects = FXCollections.observableArrayList();
+    private FilteredList<DbObject> filteredObjects;
+    private final Properties config = new Properties();
 
     @FXML
     public void initialize() {
+        config.putAll(ConfigUtil.loadOrCreate(defaultConfig()));
+
+        maxDataRowsSpinner.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(1, Integer.MAX_VALUE, 100));
+        maxDataRowsSpinner.focusedProperty().addListener((obs, o, focused) -> {
+            if (!focused) commitIntegerSpinner(maxDataRowsSpinner);
+        });
+
         loadConfigToFields();
 
         includeDmlCheck.setSelected(false);
+
+        includeDmlCheck.selectedProperty().addListener((obs, o, n) -> {
+            refreshDataExportControlsState();
+            saveFieldsToConfig();
+        });
+        exportAllDataCheck.selectedProperty().addListener((obs, o, n) -> {
+            refreshDataExportControlsState();
+            saveFieldsToConfig();
+        });
+        maxDataRowsSpinner.valueProperty().addListener((obs, o, n) -> saveFieldsToConfig());
 
         exportButton.setDisable(true);
         exportAllButton.setDisable(true);
@@ -110,9 +133,20 @@ public class MainController {
         colNullable.setCellFactory(tc -> new BoolBadgeCell("NULL", "NOT NULL"));
         colPk.setCellFactory(tc -> new BoolBadgeCell("PK", ""));
 
-        filteredTables = new FilteredList<>(allTables, t -> true);
-        tablesList.setItems(filteredTables);
+        filteredObjects = new FilteredList<>(allObjects, o -> true);
+        tablesList.setItems(filteredObjects);
         tablesList.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
+        tablesList.setCellFactory(lv -> new ListCell<>() {
+            @Override
+            protected void updateItem(DbObject item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    return;
+                }
+                setText(item.getType().name() + "  " + item.getName());
+            }
+        });
 
         hostField.textProperty().addListener((obs, o, n) -> saveFieldsToConfig());
         portField.textProperty().addListener((obs, o, n) -> saveFieldsToConfig());
@@ -121,7 +155,7 @@ public class MainController {
 
         tableFilterField.textProperty().addListener((obs, oldV, newV) -> applyTableFilter(newV));
         tablesList.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
-            selectedTableName = (newV == null) ? null : newV.trim();
+            selectedObject = newV;
             currentTable = null;
             columnTable.getItems().clear();
             disableWhileBusy(false);
@@ -129,6 +163,54 @@ public class MainController {
 
         setStatus("Ready.");
         progressBar.setProgress(0);
+
+        refreshDataExportControlsState();
+    }
+
+    private static Properties defaultConfig() {
+        Properties p = new Properties();
+        p.setProperty(CFG_HOST, "");
+        p.setProperty(CFG_PORT, "1521");
+        p.setProperty(CFG_SERVICE, "");
+        p.setProperty(CFG_USER, "");
+        p.setProperty(CFG_EXPORT_DIR, "");
+        p.setProperty(CFG_DATA_MAX_ROWS, "100");
+        p.setProperty(CFG_DATA_ALL_ROWS, "false");
+        return p;
+    }
+
+    private void refreshDataExportControlsState() {
+        boolean includeData = includeDmlCheck.isSelected();
+        boolean allRows = exportAllDataCheck.isSelected();
+        maxDataRowsSpinner.setDisable(!includeData || allRows);
+        exportAllDataCheck.setDisable(!includeData);
+    }
+
+    /**
+     * @return {@code null} = no row limit (all rows); otherwise max rows per table for INSERT export.
+     */
+    private Integer resolveDataExportMaxRows() {
+        if (exportAllDataCheck.isSelected()) {
+            return null;
+        }
+        int n = maxDataRowsSpinner.getValue();
+        return n > 0 ? Integer.valueOf(n) : null;
+    }
+
+    private static void commitIntegerSpinner(Spinner<Integer> spinner) {
+        if (!spinner.isEditable()) return;
+        String text = spinner.getEditor().getText();
+        try {
+            int v = Integer.parseInt(text.trim());
+            SpinnerValueFactory.IntegerSpinnerValueFactory fac =
+                    (SpinnerValueFactory.IntegerSpinnerValueFactory) spinner.getValueFactory();
+            int min = fac.getMin();
+            int max = fac.getMax();
+            v = Math.max(min, Math.min(max, v));
+            fac.setValue(v);
+        } catch (NumberFormatException ignored) {
+            spinner.getValueFactory().setValue(spinner.getValueFactory().getValue());
+        }
     }
 
     @FXML
@@ -159,9 +241,9 @@ public class MainController {
         disableWhileBusy(true);
         saveFieldsToConfig();
 
-        Task<List<String>> task = new Task<>() {
+        Task<List<DbObject>> task = new Task<>() {
             @Override
-            protected List<String> call() throws Exception {
+            protected List<DbObject> call() throws Exception {
                 updateMessage("Connecting...");
                 updateProgress(-1, 1);
 
@@ -172,25 +254,25 @@ public class MainController {
                 String pass = passwordField.getText();
 
                 Connection conn = DatabaseUtil.connect(host, port, service, user, pass);
-                List<String> tables = metadataService.listTables(conn);
+                List<DbObject> objects = metadataService.listObjects(conn);
 
                 connection = conn;
-                return tables;
+                return objects;
             }
         };
 
         bindTask(task);
 
         task.setOnSucceeded(e -> {
-            List<String> tables = task.getValue();
-            allTables.setAll(tables);
+            List<DbObject> objects = task.getValue();
+            allObjects.setAll(objects);
             applyTableFilter(tableFilterField.getText());
             tablesList.getSelectionModel().clearSelection();
-            selectedTableName = null;
+            selectedObject = null;
             currentTable = null;
             connectedSchema = safeSchemaName(resolveCurrentSchema(connection));
             columnTable.getItems().clear();
-            setStatus("Connected. Loaded " + tables.size() + " tables.");
+            setStatus("Connected. Loaded " + objects.size() + " objects.");
             setConnectedUi(true);
             operationInProgress = false;
             disableWhileBusy(false);
@@ -213,10 +295,10 @@ public class MainController {
         if (operationInProgress) return;
         disableWhileBusy(true);
         shutdown();
-        allTables.clear();
+        allObjects.clear();
         applyTableFilter(tableFilterField.getText());
         columnTable.getItems().clear();
-        selectedTableName = null;
+        selectedObject = null;
         connectedSchema = null;
         setStatus("Disconnected.");
         setConnectedUi(false);
@@ -226,12 +308,16 @@ public class MainController {
     @FXML
     private void onLoadPreview() {
         if (operationInProgress) return;
-        String t = getSelectedTableName();
-        if (t == null) {
+        DbObject obj = getSelectedObject();
+        if (obj == null) {
             showError("No table selected", "Please select a table first.");
             return;
         }
-        loadTableMetadata(t);
+        if (obj.getType() != DbObjectType.TABLE) {
+            showError("Preview not available", "Preview is available for TABLE only. You can still export DDL for this object.");
+            return;
+        }
+        loadTableMetadata(obj.getName());
     }
 
     private void loadTableMetadata(String tableName) {
@@ -279,9 +365,9 @@ public class MainController {
     @FXML
     private void onExport() {
         if (operationInProgress) return;
-        String tableName = getSelectedTableName();
-        if (tableName == null) {
-            showError("No table selected", "Please select a table first.");
+        DbObject obj = getSelectedObject();
+        if (obj == null) {
+            showError("No object selected", "Please select an object first.");
             return;
         }
         if (!isConnected()) {
@@ -297,6 +383,7 @@ public class MainController {
         }
 
         boolean includeDml = includeDmlCheck.isSelected();
+        final Integer dataMaxRows = (includeDml && obj.getType() == DbObjectType.TABLE) ? resolveDataExportMaxRows() : null;
 
         LocalDateTime now = LocalDateTime.now();
         String exportFolderName = connectedSchema + "_" + EXPORT_TS_FMT.format(now);
@@ -316,16 +403,25 @@ public class MainController {
                 Files.createDirectories(ddlDir);
                 Files.createDirectories(dataDir);
 
-                TableInfo tableInfo = metadataService.loadTableInfo(connection, tableName);
+                if (obj.getType() == DbObjectType.TABLE) {
+                    TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
+                    Path ddlTarget = ddlDir.resolve(obj.getName() + ".sql");
+                    updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
+                    exportService.exportSql(tableInfo, ddlTarget);
 
-                Path ddlTarget = ddlDir.resolve(tableName + ".sql");
-                updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
-                exportService.exportSql(tableInfo, ddlTarget);
-
-                if (includeDml) {
-                    Path dataTarget = dataDir.resolve(tableName + ".sql");
-                    updateMessage("Exporting DATA to " + dataTarget.getFileName() + "...");
-                    exportService.exportDataSql(connection, tableName, dataTarget);
+                    if (includeDml) {
+                        Path dataTarget = dataDir.resolve(obj.getName() + ".sql");
+                        updateMessage("Exporting DATA to " + dataTarget.getFileName() + "...");
+                        exportService.exportDataSql(connection, obj.getName(), dataTarget, dataMaxRows);
+                    }
+                } else {
+                    String ddl = metadataService.loadObjectDdl(connection, connectedSchema, obj);
+                    if (ddl == null || ddl.isBlank()) {
+                        throw new IllegalStateException("Could not load DDL for " + obj.getType() + " " + obj.getName());
+                    }
+                    Path ddlTarget = ddlDir.resolve(obj.getType().name().toLowerCase(Locale.ROOT) + "_" + obj.getName() + ".sql");
+                    updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
+                    exportService.exportRawSql(ddl, ddlTarget);
                 }
 
                 return exportRoot;
@@ -361,8 +457,8 @@ public class MainController {
             showError("Export folder not set", "Please choose an export folder first.");
             return;
         }
-        if (allTables.isEmpty()) {
-            showError("No tables", "No tables loaded.");
+        if (allObjects.isEmpty()) {
+            showError("No objects", "No objects loaded.");
             return;
         }
         if (connectedSchema == null || connectedSchema.isBlank()) {
@@ -370,6 +466,7 @@ public class MainController {
         }
 
         boolean includeDml = includeDmlCheck.isSelected();
+        final Integer dataMaxRows = includeDml ? resolveDataExportMaxRows() : null;
 
         LocalDateTime now = LocalDateTime.now();
         String exportFolderName = connectedSchema + "_" + EXPORT_TS_FMT.format(now);
@@ -384,24 +481,33 @@ public class MainController {
             @Override
             protected Path call() throws Exception {
                 updateMessage("Preparing export folders...");
-                updateProgress(0, allTables.size());
+                updateProgress(0, allObjects.size());
 
                 Files.createDirectories(ddlDir);
                 Files.createDirectories(dataDir);
 
-                int total = allTables.size();
+                int total = allObjects.size();
                 for (int i = 0; i < total; i++) {
-                    String tableName = allTables.get(i);
-                    if (tableName == null || tableName.isBlank()) continue;
+                    DbObject obj = allObjects.get(i);
+                    if (obj == null) continue;
 
                     updateProgress(i, total);
-                    updateMessage("Exporting " + tableName + " (" + (i + 1) + "/" + total + ")...");
+                    updateMessage("Exporting " + obj.getType() + " " + obj.getName() + " (" + (i + 1) + "/" + total + ")...");
 
-                    TableInfo tableInfo = metadataService.loadTableInfo(connection, tableName);
-                    exportService.exportSql(tableInfo, ddlDir.resolve(tableName + ".sql"));
+                    if (obj.getType() == DbObjectType.TABLE) {
+                        TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
+                        exportService.exportSql(tableInfo, ddlDir.resolve(obj.getName() + ".sql"));
 
-                    if (includeDml) {
-                        exportService.exportDataSql(connection, tableName, dataDir.resolve(tableName + ".sql"));
+                        if (includeDml) {
+                            exportService.exportDataSql(connection, obj.getName(), dataDir.resolve(obj.getName() + ".sql"), dataMaxRows);
+                        }
+                    } else {
+                        String ddl = metadataService.loadObjectDdl(connection, connectedSchema, obj);
+                        if (ddl == null || ddl.isBlank()) {
+                            throw new IllegalStateException("Could not load DDL for " + obj.getType() + " " + obj.getName());
+                        }
+                        Path ddlTarget = ddlDir.resolve(obj.getType().name().toLowerCase(Locale.ROOT) + "_" + obj.getName() + ".sql");
+                        exportService.exportRawSql(ddl, ddlTarget);
                     }
                 }
 
@@ -437,16 +543,19 @@ public class MainController {
 
     private void disableWhileBusy(boolean busy) {
         boolean connected = isConnected();
-        boolean hasSelection = getSelectedTableName() != null;
+        DbObject obj = getSelectedObject();
+        boolean hasSelection = obj != null;
+        boolean hasTableSelection = obj != null && obj.getType() == DbObjectType.TABLE;
         boolean hasExportDir = exportBaseDir != null && Files.isDirectory(exportBaseDir);
         connectButton.setDisable(busy || connected);
         disconnectButton.setDisable(busy || !connected);
         browseExportFolderButton.setDisable(busy);
         tablesList.setDisable(busy || !connected);
         tableFilterField.setDisable(busy || !connected);
-        loadPreviewButton.setDisable(busy || !connected || !hasSelection);
+        loadPreviewButton.setDisable(busy || !connected || !hasTableSelection);
         exportButton.setDisable(busy || !connected || !hasSelection || !hasExportDir);
-        exportAllButton.setDisable(busy || !connected || allTables.isEmpty() || !hasExportDir);
+        exportAllButton.setDisable(busy || !connected || allObjects.isEmpty() || !hasExportDir);
+        refreshDataExportControlsState();
     }
 
     private void setConnectedUi(boolean connected) {
@@ -468,10 +577,11 @@ public class MainController {
 
     private void applyTableFilter(String filter) {
         String f = filter == null ? "" : filter.trim().toUpperCase(Locale.ROOT);
-        filteredTables.setPredicate(t -> {
-            if (t == null) return false;
+        filteredObjects.setPredicate(o -> {
+            if (o == null) return false;
             if (f.isEmpty()) return true;
-            return t.toUpperCase(Locale.ROOT).contains(f);
+            return o.getName().toUpperCase(Locale.ROOT).contains(f)
+                    || o.getType().name().toUpperCase(Locale.ROOT).contains(f);
         });
     }
 
@@ -489,6 +599,10 @@ public class MainController {
                 exportFolderField.setText(exportBaseDir.toString());
             }
         }
+
+        exportAllDataCheck.setSelected(Boolean.parseBoolean(config.getProperty(CFG_DATA_ALL_ROWS, "false")));
+        int maxRows = parsePositiveInt(config.getProperty(CFG_DATA_MAX_ROWS, "100"), 100);
+        maxDataRowsSpinner.getValueFactory().setValue(maxRows);
     }
 
     private void saveFieldsToConfig() {
@@ -499,7 +613,18 @@ public class MainController {
         if (exportBaseDir != null) {
             config.setProperty(CFG_EXPORT_DIR, exportBaseDir.toString());
         }
+        config.setProperty(CFG_DATA_ALL_ROWS, Boolean.toString(exportAllDataCheck.isSelected()));
+        config.setProperty(CFG_DATA_MAX_ROWS, Integer.toString(maxDataRowsSpinner.getValue()));
         ConfigUtil.save(config);
+    }
+
+    private static int parsePositiveInt(String raw, int fallback) {
+        try {
+            int v = Integer.parseInt(raw.trim());
+            return v > 0 ? v : fallback;
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     private static String resolveCurrentSchema(Connection connection) {
@@ -554,14 +679,13 @@ public class MainController {
         } finally {
             connection = null;
             currentTable = null;
-            selectedTableName = null;
+            selectedObject = null;
             connectedSchema = null;
         }
     }
 
-    private String getSelectedTableName() {
-        if (selectedTableName == null || selectedTableName.isBlank()) return null;
-        return selectedTableName.trim().toUpperCase(Locale.ROOT);
+    private DbObject getSelectedObject() {
+        return selectedObject;
     }
 
 

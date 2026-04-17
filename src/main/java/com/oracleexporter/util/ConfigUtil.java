@@ -6,6 +6,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.Properties;
 
 public final class ConfigUtil {
@@ -30,6 +31,39 @@ public final class ConfigUtil {
             // best-effort config; ignore load failures
         }
         return p;
+    }
+
+    /**
+     * Best-effort initialization: if config file doesn't exist, create it with provided defaults.
+     * Always returns a Properties instance (loaded from disk if possible, otherwise defaults).
+     */
+    public static Properties loadOrCreate(Properties defaults) {
+        Properties base = new Properties();
+        if (defaults != null) {
+            base.putAll(defaults);
+        }
+
+        Path path = configPath();
+        if (!Files.exists(path)) {
+            try {
+                Files.createDirectories(path.getParent());
+                try (OutputStream out = Files.newOutputStream(path, StandardOpenOption.CREATE_NEW)) {
+                    base.store(out, "OracleSchemaExporter config");
+                }
+            } catch (IOException ignored) {
+                // best-effort config; ignore init failures
+            }
+            return base;
+        }
+
+        Properties loaded = new Properties();
+        loaded.putAll(base);
+        try (InputStream in = Files.newInputStream(path)) {
+            loaded.load(in);
+        } catch (IOException ignored) {
+            // best-effort config; ignore load failures and fall back to defaults
+        }
+        return loaded;
     }
 
     public static void save(Properties p) {

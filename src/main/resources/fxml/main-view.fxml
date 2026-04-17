@@ -62,8 +62,8 @@
 
             <items>
                 <VBox spacing="10">
-                    <Label text="Tables" styleClass="section-title"/>
-                    <TextField fx:id="tableFilterField" promptText="Filter tables..."/>
+                    <Label text="Objects" styleClass="section-title"/>
+                    <TextField fx:id="tableFilterField" promptText="Filter objects..."/>
                     <ListView fx:id="tablesList" VBox.vgrow="ALWAYS"/>
                 </VBox>
 
@@ -75,6 +75,13 @@
                         <CheckBox fx:id="includeDmlCheck" text="Include data (INSERT)"/>
                         <Button fx:id="exportButton" text="Export table" onAction="#onExport" styleClass="primary"/>
                         <Button fx:id="exportAllButton" text="Export ALL" onAction="#onExportAll"/>
+                    </HBox>
+
+                    <HBox spacing="10" alignment="CENTER_LEFT">
+                        <Label text="Max data rows per table"/>
+                        <Spinner fx:id="maxDataRowsSpinner" prefWidth="110" editable="true"/>
+                        <CheckBox fx:id="exportAllDataCheck" text="Export all rows"/>
+                        <Region HBox.hgrow="ALWAYS"/>
                     </HBox>
 
                     <TableView fx:id="columnTable" VBox.vgrow="ALWAYS">

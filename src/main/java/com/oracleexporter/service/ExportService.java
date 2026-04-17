@@ -38,21 +38,46 @@ public class ExportService {
         return file;
     }
 
-    public Path exportDataSql(Connection connection, String tableName, Path file) throws IOException, SQLException {
+    public Path exportRawSql(String sql, Path file) throws IOException {
+        if (sql == null) throw new IllegalArgumentException("sql is null");
+        try (BufferedWriter w = Files.newBufferedWriter(file, UTF8)) {
+            w.write(sql);
+            if (!sql.endsWith("\n")) {
+                w.newLine();
+            }
+        }
+        return file;
+    }
+
+    /**
+     * @param maxRows {@code null} or non-positive = export all rows; otherwise cap at this many rows (Oracle {@code FETCH FIRST}).
+     */
+    public Path exportDataSql(Connection connection, String tableName, Path file, Integer maxRows) throws IOException, SQLException {
         if (connection == null) throw new IllegalArgumentException("connection is null");
         if (tableName == null || tableName.isBlank()) throw new IllegalArgumentException("tableName is blank");
 
         String t = tableName.trim().toUpperCase(Locale.ROOT);
-        String sql = "SELECT * FROM " + quoteIdent(t);
+        StringBuilder sql = new StringBuilder("SELECT * FROM ").append(quoteIdent(t));
+        boolean limited = maxRows != null && maxRows > 0;
+        if (limited) {
+            sql.append(" FETCH FIRST ").append(maxRows).append(" ROWS ONLY");
+        }
 
         try (BufferedWriter w = Files.newBufferedWriter(file, UTF8);
-             PreparedStatement ps = connection.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+             PreparedStatement ps = connection.prepareStatement(sql.toString(), ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
              ResultSet rs = ps.executeQuery()) {
 
             ps.setFetchSize(1000);
 
             w.write("-- Data export for table " + quoteIdent(t));
             w.newLine();
+            if (limited) {
+                w.write("-- Row limit: first " + maxRows + " rows");
+                w.newLine();
+            } else {
+                w.write("-- Row limit: none (all rows)");
+                w.newLine();
+            }
             w.write("SET DEFINE OFF;");
             w.newLine();
             w.newLine();
