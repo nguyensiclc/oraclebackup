@@ -18,6 +18,20 @@ import java.util.Set;
 
 public class MetadataService {
 
+    public boolean isSchemaEmpty(Connection connection) throws SQLException {
+        String sql = """
+                SELECT COUNT(*)
+                FROM USER_OBJECTS
+                WHERE OBJECT_TYPE IN ('TABLE', 'VIEW', 'MATERIALIZED VIEW', 'PROCEDURE')
+                  AND OBJECT_NAME NOT LIKE 'BIN$%'
+                """;
+        try (PreparedStatement ps = connection.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            rs.next();
+            return rs.getInt(1) == 0;
+        }
+    }
+
     public List<DbObject> listObjects(Connection connection) throws SQLException {
         List<DbObject> objects = new ArrayList<>();
 

@@ -2,6 +2,10 @@
     -fx-font-family: "Segoe UI", "Inter", Arial;
     -fx-base: #0f172a;
     -fx-background: #0b1220;
+    /* Accent palette */
+    -fx-accent: #f97316; /* orange */
+    -fx-focus-color: rgba(249,115,22,0.55);
+    -fx-faint-focus-color: rgba(249,115,22,0.18);
 }
 
 .top-pane {
@@ -48,6 +52,80 @@
 .button.primary {
     -fx-background-color: #2563eb;
     -fx-border-color: rgba(255,255,255,0.18);
+}
+
+.button:hover {
+    -fx-background-color: rgba(255,255,255,0.10);
+}
+
+.button.primary:hover {
+    -fx-background-color: #1d4ed8;
+}
+
+/* Orange CTA for destructive/important actions like Import */
+.button.accent {
+    -fx-background-color: #f97316;
+    -fx-text-fill: #0b1220;
+    -fx-border-color: rgba(255,255,255,0.18);
+}
+
+.button.accent:hover {
+    -fx-background-color: #fb923c;
+}
+
+.button:disabled {
+    -fx-opacity: 0.55;
+}
+
+.tab-pane {
+    -fx-background-color: transparent;
+}
+
+.tab-pane .tab-header-area .tab-header-background {
+    -fx-background-color: rgba(255,255,255,0.02);
+}
+
+.tab-pane .tab {
+    -fx-background-color: rgba(255,255,255,0.05);
+    -fx-background-radius: 10 10 0 0;
+    -fx-border-radius: 10 10 0 0;
+    -fx-border-color: rgba(255,255,255,0.10);
+    -fx-padding: 6 10;
+}
+
+.tab-pane .tab .tab-label {
+    -fx-text-fill: rgba(226,232,240,0.85);
+    -fx-font-weight: 700;
+}
+
+.tab-pane .tab:selected {
+    -fx-background-color: rgba(249,115,22,0.18);
+    -fx-border-color: rgba(249,115,22,0.55);
+}
+
+.tab-pane .tab:selected .tab-label {
+    -fx-text-fill: #fed7aa;
+}
+
+.list-view {
+    -fx-background-color: rgba(255,255,255,0.03);
+    -fx-border-color: rgba(255,255,255,0.10);
+    -fx-border-radius: 12;
+    -fx-background-radius: 12;
+}
+
+.list-cell {
+    -fx-background-color: transparent;
+    -fx-text-fill: #e2e8f0;
+}
+
+.list-cell:filled:selected, .list-cell:filled:selected:hover {
+    -fx-background-color: rgba(249,115,22,0.22);
+    -fx-text-fill: #fff7ed;
+}
+
+.list-cell:filled:hover {
+    -fx-background-color: rgba(255,255,255,0.05);
 }
 
 .table-view {

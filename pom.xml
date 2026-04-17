@@ -150,6 +150,30 @@
                     </execution>
                 </executions>
             </plugin>
+
+            <!-- Workaround: ensure launcher .cfg sits next to the .exe (some jpackage layouts place it under app/) -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>copy-launcher-cfg-next-to-exe</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <copy file="${project.build.directory}/dist/OracleSchemaExporter/app/OracleSchemaExporter.cfg"
+                                      tofile="${project.build.directory}/dist/OracleSchemaExporter/OracleSchemaExporter.cfg"
+                                      overwrite="true"
+                                      failonerror="false"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
@@ -175,9 +199,8 @@
                                     <appVersion>${project.version}</appVersion>
                                     <vendor>OracleSchemaExporter</vendor>
                                     <destination>${project.build.directory}/dist</destination>
-                                    <input>${project.build.directory}/jpackage/input</input>
-                                    <mainJar>${project.build.finalName}.jar</mainJar>
-                                    <mainClass>com.oracleexporter.gui.OracleSchemaExporterApp</mainClass>
+                                    <!-- Build installer from the already-generated app-image -->
+                                    <appImage>${project.build.directory}/dist/OracleSchemaExporter</appImage>
                                     <type>EXE</type>
                                     <winMenu>true</winMenu>
                                     <winShortcut>true</winShortcut>

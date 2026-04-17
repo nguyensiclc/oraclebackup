@@ -69,19 +69,6 @@ public class ExportService {
 
             ps.setFetchSize(1000);
 
-            w.write("-- Data export for table " + quoteIdent(t));
-            w.newLine();
-            if (limited) {
-                w.write("-- Row limit: first " + maxRows + " rows");
-                w.newLine();
-            } else {
-                w.write("-- Row limit: none (all rows)");
-                w.newLine();
-            }
-            w.write("SET DEFINE OFF;");
-            w.newLine();
-            w.newLine();
-
             ResultSetMetaData md = rs.getMetaData();
             int colCount = md.getColumnCount();
 

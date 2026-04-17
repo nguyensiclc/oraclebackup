@@ -5,6 +5,7 @@ import com.oracleexporter.model.DbObject;
 import com.oracleexporter.model.DbObjectType;
 import com.oracleexporter.model.TableInfo;
 import com.oracleexporter.service.ExportService;
+import com.oracleexporter.service.ImportService;
 import com.oracleexporter.service.MetadataService;
 import com.oracleexporter.util.ConfigUtil;
 import com.oracleexporter.util.DatabaseUtil;
@@ -39,6 +40,7 @@ public class MainController {
     private static final String CFG_SERVICE = "db.service";
     private static final String CFG_USER = "db.user";
     private static final String CFG_EXPORT_DIR = "export.baseDir";
+    private static final String CFG_IMPORT_DIR = "import.baseDir";
     private static final String CFG_DATA_MAX_ROWS = "export.data.maxRows";
     private static final String CFG_DATA_ALL_ROWS = "export.data.allRows";
 
@@ -54,8 +56,14 @@ public class MainController {
     @FXML private Button disconnectButton;
     @FXML private TextField exportFolderField;
     @FXML private Button browseExportFolderButton;
+    @FXML private TextField importFolderField;
+    @FXML private Button browseImportFolderButton;
     @FXML private TextField tableFilterField;
-    @FXML private ListView<DbObject> tablesList;
+    @FXML private TabPane objectTypeTabs;
+    @FXML private ListView<DbObject> tableList;
+    @FXML private ListView<DbObject> viewList;
+    @FXML private ListView<DbObject> mviewList;
+    @FXML private ListView<DbObject> procedureList;
 
     @FXML private TableView<ColumnInfo> columnTable;
     @FXML private TableColumn<ColumnInfo, String> colName;
@@ -73,21 +81,34 @@ public class MainController {
     @FXML private Button loadPreviewButton;
     @FXML private Button exportButton;
     @FXML private Button exportAllButton;
+    @FXML private Button importButton;
 
     @FXML private ProgressBar progressBar;
     @FXML private Label statusLabel;
 
     private final MetadataService metadataService = new MetadataService();
     private final ExportService exportService = new ExportService();
+    private final ImportService importService = new ImportService();
 
     private Connection connection;
     private TableInfo currentTable;
     private DbObject selectedObject;
     private String connectedSchema;
     private Path exportBaseDir;
+    private Path importDir;
     private boolean operationInProgress;
     private final ObservableList<DbObject> allObjects = FXCollections.observableArrayList();
-    private FilteredList<DbObject> filteredObjects;
+    private final ObservableList<DbObject> tableObjects = FXCollections.observableArrayList();
+    private final ObservableList<DbObject> viewObjects = FXCollections.observableArrayList();
+    private final ObservableList<DbObject> mviewObjects = FXCollections.observableArrayList();
+    private final ObservableList<DbObject> procedureObjects = FXCollections.observableArrayList();
+
+    private FilteredList<DbObject> filteredTables;
+    private FilteredList<DbObject> filteredViews;
+    private FilteredList<DbObject> filteredMviews;
+    private FilteredList<DbObject> filteredProcedures;
+
+    private boolean updatingSelection;
     private final Properties config = new Properties();
 
     @FXML
@@ -117,6 +138,8 @@ public class MainController {
         exportAllButton.setDisable(true);
         disconnectButton.setDisable(true);
         loadPreviewButton.setDisable(true);
+        if (importButton != null) importButton.setDisable(true);
+        if (importButton != null) importButton.getStyleClass().add("accent");
 
         columnTable.setItems(FXCollections.observableArrayList());
         columnTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
@@ -133,20 +156,15 @@ public class MainController {
         colNullable.setCellFactory(tc -> new BoolBadgeCell("NULL", "NOT NULL"));
         colPk.setCellFactory(tc -> new BoolBadgeCell("PK", ""));
 
-        filteredObjects = new FilteredList<>(allObjects, o -> true);
-        tablesList.setItems(filteredObjects);
-        tablesList.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
-        tablesList.setCellFactory(lv -> new ListCell<>() {
-            @Override
-            protected void updateItem(DbObject item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    return;
-                }
-                setText(item.getType().name() + "  " + item.getName());
-            }
-        });
+        filteredTables = new FilteredList<>(tableObjects, o -> true);
+        filteredViews = new FilteredList<>(viewObjects, o -> true);
+        filteredMviews = new FilteredList<>(mviewObjects, o -> true);
+        filteredProcedures = new FilteredList<>(procedureObjects, o -> true);
+
+        setupObjectList(tableList, filteredTables);
+        setupObjectList(viewList, filteredViews);
+        setupObjectList(mviewList, filteredMviews);
+        setupObjectList(procedureList, filteredProcedures);
 
         hostField.textProperty().addListener((obs, o, n) -> saveFieldsToConfig());
         portField.textProperty().addListener((obs, o, n) -> saveFieldsToConfig());
@@ -154,17 +172,56 @@ public class MainController {
         userField.textProperty().addListener((obs, o, n) -> saveFieldsToConfig());
 
         tableFilterField.textProperty().addListener((obs, oldV, newV) -> applyTableFilter(newV));
-        tablesList.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
-            selectedObject = newV;
-            currentTable = null;
-            columnTable.getItems().clear();
-            disableWhileBusy(false);
-        });
+
+        wireSelection(tableList);
+        wireSelection(viewList);
+        wireSelection(mviewList);
+        wireSelection(procedureList);
 
         setStatus("Ready.");
         progressBar.setProgress(0);
 
         refreshDataExportControlsState();
+    }
+
+    private void setupObjectList(ListView<DbObject> listView, FilteredList<DbObject> items) {
+        if (listView == null) return;
+        listView.setItems(items);
+        listView.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
+        listView.setCellFactory(lv -> new ListCell<>() {
+            @Override
+            protected void updateItem(DbObject item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    return;
+                }
+                setText(item.getName());
+            }
+        });
+    }
+
+    private void wireSelection(ListView<DbObject> lv) {
+        if (lv == null) return;
+        lv.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
+            if (updatingSelection) return;
+            if (newV == null) return;
+
+            updatingSelection = true;
+            try {
+                if (lv != tableList && tableList != null) tableList.getSelectionModel().clearSelection();
+                if (lv != viewList && viewList != null) viewList.getSelectionModel().clearSelection();
+                if (lv != mviewList && mviewList != null) mviewList.getSelectionModel().clearSelection();
+                if (lv != procedureList && procedureList != null) procedureList.getSelectionModel().clearSelection();
+            } finally {
+                updatingSelection = false;
+            }
+
+            selectedObject = newV;
+            currentTable = null;
+            columnTable.getItems().clear();
+            disableWhileBusy(false);
+        });
     }
 
     private static Properties defaultConfig() {
@@ -174,6 +231,7 @@ public class MainController {
         p.setProperty(CFG_SERVICE, "");
         p.setProperty(CFG_USER, "");
         p.setProperty(CFG_EXPORT_DIR, "");
+        p.setProperty(CFG_IMPORT_DIR, "");
         p.setProperty(CFG_DATA_MAX_ROWS, "100");
         p.setProperty(CFG_DATA_ALL_ROWS, "false");
         return p;
@@ -231,6 +289,23 @@ public class MainController {
     }
 
     @FXML
+    private void onBrowseImportFolder() {
+        if (operationInProgress) return;
+        DirectoryChooser chooser = new DirectoryChooser();
+        chooser.setTitle("Choose import folder (export root)");
+        if (importDir != null && Files.isDirectory(importDir)) {
+            chooser.setInitialDirectory(importDir.toFile());
+        }
+        var selected = chooser.showDialog(browseImportFolderButton.getScene().getWindow());
+        if (selected == null) return;
+
+        importDir = selected.toPath();
+        importFolderField.setText(importDir.toString());
+        saveFieldsToConfig();
+        disableWhileBusy(false);
+    }
+
+    @FXML
     private void onConnect() {
         if (operationInProgress) return;
         if (isConnected()) {
@@ -266,8 +341,9 @@ public class MainController {
         task.setOnSucceeded(e -> {
             List<DbObject> objects = task.getValue();
             allObjects.setAll(objects);
+            rebuildTypeLists();
             applyTableFilter(tableFilterField.getText());
-            tablesList.getSelectionModel().clearSelection();
+            clearAllSelections();
             selectedObject = null;
             currentTable = null;
             connectedSchema = safeSchemaName(resolveCurrentSchema(connection));
@@ -296,6 +372,10 @@ public class MainController {
         disableWhileBusy(true);
         shutdown();
         allObjects.clear();
+        tableObjects.clear();
+        viewObjects.clear();
+        mviewObjects.clear();
+        procedureObjects.clear();
         applyTableFilter(tableFilterField.getText());
         columnTable.getItems().clear();
         selectedObject = null;
@@ -388,8 +468,9 @@ public class MainController {
         LocalDateTime now = LocalDateTime.now();
         String exportFolderName = connectedSchema + "_" + EXPORT_TS_FMT.format(now);
         Path exportRoot = exportBaseDir.resolve(exportFolderName);
-        Path ddlDir = exportRoot.resolve("ddl");
-        Path dataDir = exportRoot.resolve("data");
+        Path typeRoot = exportRoot.resolve(typeFolder(obj.getType()));
+        Path ddlDir = typeRoot.resolve("ddl");
+        Path dataDir = typeRoot.resolve("data");
 
         operationInProgress = true;
         disableWhileBusy(true);
@@ -419,7 +500,7 @@ public class MainController {
                     if (ddl == null || ddl.isBlank()) {
                         throw new IllegalStateException("Could not load DDL for " + obj.getType() + " " + obj.getName());
                     }
-                    Path ddlTarget = ddlDir.resolve(obj.getType().name().toLowerCase(Locale.ROOT) + "_" + obj.getName() + ".sql");
+                    Path ddlTarget = ddlDir.resolve(obj.getName() + ".sql");
                     updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
                     exportService.exportRawSql(ddl, ddlTarget);
                 }
@@ -457,7 +538,9 @@ public class MainController {
             showError("Export folder not set", "Please choose an export folder first.");
             return;
         }
-        if (allObjects.isEmpty()) {
+        DbObjectType exportType = resolveSelectedTypeForExportAll();
+        List<DbObject> objectsToExport = resolveObjectsForType(exportType);
+        if (objectsToExport.isEmpty()) {
             showError("No objects", "No objects loaded.");
             return;
         }
@@ -471,8 +554,9 @@ public class MainController {
         LocalDateTime now = LocalDateTime.now();
         String exportFolderName = connectedSchema + "_" + EXPORT_TS_FMT.format(now);
         Path exportRoot = exportBaseDir.resolve(exportFolderName);
-        Path ddlDir = exportRoot.resolve("ddl");
-        Path dataDir = exportRoot.resolve("data");
+        Path selectedTypeRoot = exportRoot.resolve(typeFolder(exportType));
+        Path ddlDir = selectedTypeRoot.resolve("ddl");
+        Path dataDir = selectedTypeRoot.resolve("data");
 
         operationInProgress = true;
         disableWhileBusy(true);
@@ -481,14 +565,14 @@ public class MainController {
             @Override
             protected Path call() throws Exception {
                 updateMessage("Preparing export folders...");
-                updateProgress(0, allObjects.size());
+                updateProgress(0, objectsToExport.size());
 
                 Files.createDirectories(ddlDir);
                 Files.createDirectories(dataDir);
 
-                int total = allObjects.size();
+                int total = objectsToExport.size();
                 for (int i = 0; i < total; i++) {
-                    DbObject obj = allObjects.get(i);
+                    DbObject obj = objectsToExport.get(i);
                     if (obj == null) continue;
 
                     updateProgress(i, total);
@@ -506,7 +590,7 @@ public class MainController {
                         if (ddl == null || ddl.isBlank()) {
                             throw new IllegalStateException("Could not load DDL for " + obj.getType() + " " + obj.getName());
                         }
-                        Path ddlTarget = ddlDir.resolve(obj.getType().name().toLowerCase(Locale.ROOT) + "_" + obj.getName() + ".sql");
+                        Path ddlTarget = ddlDir.resolve(obj.getName() + ".sql");
                         exportService.exportRawSql(ddl, ddlTarget);
                     }
                 }
@@ -534,6 +618,74 @@ public class MainController {
         new Thread(task, "export-all-task").start();
     }
 
+    @FXML
+    private void onImport() {
+        if (operationInProgress) return;
+        if (!isConnected()) {
+            showError("Not connected", "Please connect first.");
+            return;
+        }
+        if (importDir == null || !Files.isDirectory(importDir)) {
+            showError("Import folder not set", "Please choose an import folder first.");
+            return;
+        }
+
+        operationInProgress = true;
+        disableWhileBusy(true);
+
+        Task<Path> task = new Task<>() {
+            @Override
+            protected Path call() throws Exception {
+                updateMessage("Checking schema is empty...");
+                updateProgress(-1, 1);
+                if (!metadataService.isSchemaEmpty(connection)) {
+                    throw new IllegalStateException("Target schema is not empty. Please use a new/empty schema.");
+                }
+
+                updateMessage("Importing from folder...");
+                importService.importFromExportFolder(connection, importDir);
+
+                return importDir;
+            }
+        };
+
+        bindTask(task);
+        task.setOnSucceeded(e -> {
+            setStatus("Imported from folder: " + task.getValue());
+            operationInProgress = false;
+            disableWhileBusy(false);
+        });
+        task.setOnFailed(e -> {
+            Throwable ex = task.getException();
+            showError("Import failed", ex == null ? "Unknown error" : ex.getMessage());
+            setStatus("Import failed.");
+            operationInProgress = false;
+            disableWhileBusy(false);
+        });
+
+        new Thread(task, "import-task").start();
+    }
+
+    private DbObjectType resolveSelectedTypeForExportAll() {
+        if (objectTypeTabs == null) return DbObjectType.TABLE;
+        int idx = objectTypeTabs.getSelectionModel().getSelectedIndex();
+        return switch (idx) {
+            case 1 -> DbObjectType.VIEW;
+            case 2 -> DbObjectType.MATERIALIZED_VIEW;
+            case 3 -> DbObjectType.PROCEDURE;
+            default -> DbObjectType.TABLE;
+        };
+    }
+
+    private List<DbObject> resolveObjectsForType(DbObjectType type) {
+        return switch (type) {
+            case TABLE -> List.copyOf(tableObjects);
+            case VIEW -> List.copyOf(viewObjects);
+            case MATERIALIZED_VIEW -> List.copyOf(mviewObjects);
+            case PROCEDURE -> List.copyOf(procedureObjects);
+        };
+    }
+
     private void bindTask(Task<?> task) {
         statusLabel.textProperty().unbind();
         progressBar.progressProperty().unbind();
@@ -547,14 +699,20 @@ public class MainController {
         boolean hasSelection = obj != null;
         boolean hasTableSelection = obj != null && obj.getType() == DbObjectType.TABLE;
         boolean hasExportDir = exportBaseDir != null && Files.isDirectory(exportBaseDir);
+        boolean hasImportDir = importDir != null && Files.isDirectory(importDir);
         connectButton.setDisable(busy || connected);
         disconnectButton.setDisable(busy || !connected);
         browseExportFolderButton.setDisable(busy);
-        tablesList.setDisable(busy || !connected);
+        if (browseImportFolderButton != null) browseImportFolderButton.setDisable(busy);
+        if (tableList != null) tableList.setDisable(busy || !connected);
+        if (viewList != null) viewList.setDisable(busy || !connected);
+        if (mviewList != null) mviewList.setDisable(busy || !connected);
+        if (procedureList != null) procedureList.setDisable(busy || !connected);
         tableFilterField.setDisable(busy || !connected);
         loadPreviewButton.setDisable(busy || !connected || !hasTableSelection);
         exportButton.setDisable(busy || !connected || !hasSelection || !hasExportDir);
         exportAllButton.setDisable(busy || !connected || allObjects.isEmpty() || !hasExportDir);
+        if (importButton != null) importButton.setDisable(busy || !connected || !hasImportDir);
         refreshDataExportControlsState();
     }
 
@@ -577,12 +735,53 @@ public class MainController {
 
     private void applyTableFilter(String filter) {
         String f = filter == null ? "" : filter.trim().toUpperCase(Locale.ROOT);
-        filteredObjects.setPredicate(o -> {
+        java.util.function.Predicate<DbObject> pred = o -> {
             if (o == null) return false;
             if (f.isEmpty()) return true;
             return o.getName().toUpperCase(Locale.ROOT).contains(f)
                     || o.getType().name().toUpperCase(Locale.ROOT).contains(f);
-        });
+        };
+        filteredTables.setPredicate(pred);
+        filteredViews.setPredicate(pred);
+        filteredMviews.setPredicate(pred);
+        filteredProcedures.setPredicate(pred);
+    }
+
+    private void rebuildTypeLists() {
+        tableObjects.clear();
+        viewObjects.clear();
+        mviewObjects.clear();
+        procedureObjects.clear();
+        for (DbObject o : allObjects) {
+            if (o == null) continue;
+            switch (o.getType()) {
+                case TABLE -> tableObjects.add(o);
+                case VIEW -> viewObjects.add(o);
+                case MATERIALIZED_VIEW -> mviewObjects.add(o);
+                case PROCEDURE -> procedureObjects.add(o);
+            }
+        }
+    }
+
+    private void clearAllSelections() {
+        updatingSelection = true;
+        try {
+            if (tableList != null) tableList.getSelectionModel().clearSelection();
+            if (viewList != null) viewList.getSelectionModel().clearSelection();
+            if (mviewList != null) mviewList.getSelectionModel().clearSelection();
+            if (procedureList != null) procedureList.getSelectionModel().clearSelection();
+        } finally {
+            updatingSelection = false;
+        }
+    }
+
+    private static String typeFolder(DbObjectType type) {
+        return switch (type) {
+            case TABLE -> "table";
+            case VIEW -> "view";
+            case MATERIALIZED_VIEW -> "materialized_view";
+            case PROCEDURE -> "procedure";
+        };
     }
 
     private void loadConfigToFields() {
@@ -600,6 +799,15 @@ public class MainController {
             }
         }
 
+        String importBase = config.getProperty(CFG_IMPORT_DIR, "");
+        if (!importBase.isBlank()) {
+            Path p = Paths.get(importBase);
+            if (Files.isDirectory(p)) {
+                importDir = p;
+                importFolderField.setText(importDir.toString());
+            }
+        }
+
         exportAllDataCheck.setSelected(Boolean.parseBoolean(config.getProperty(CFG_DATA_ALL_ROWS, "false")));
         int maxRows = parsePositiveInt(config.getProperty(CFG_DATA_MAX_ROWS, "100"), 100);
         maxDataRowsSpinner.getValueFactory().setValue(maxRows);
@@ -612,6 +820,9 @@ public class MainController {
         config.setProperty(CFG_USER, nv(userField.getText()).trim());
         if (exportBaseDir != null) {
             config.setProperty(CFG_EXPORT_DIR, exportBaseDir.toString());
+        }
+        if (importDir != null) {
+            config.setProperty(CFG_IMPORT_DIR, importDir.toString());
         }
         config.setProperty(CFG_DATA_ALL_ROWS, Boolean.toString(exportAllDataCheck.isSelected()));
         config.setProperty(CFG_DATA_MAX_ROWS, Integer.toString(maxDataRowsSpinner.getValue()));

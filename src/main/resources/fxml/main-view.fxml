@@ -50,6 +50,12 @@
                     <TextField fx:id="exportFolderField" promptText="Choose a folder to save exports..." editable="false" HBox.hgrow="ALWAYS"/>
                     <Button fx:id="browseExportFolderButton" text="Browse..." onAction="#onBrowseExportFolder"/>
                 </HBox>
+
+                <Label text="Import folder" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
+                <HBox spacing="10" GridPane.rowIndex="3" GridPane.columnIndex="1" GridPane.columnSpan="5">
+                    <TextField fx:id="importFolderField" promptText="Choose an export folder to import..." editable="false" HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="browseImportFolderButton" text="Browse..." onAction="#onBrowseImportFolder"/>
+                </HBox>
             </GridPane>
         </VBox>
     </top>
@@ -64,7 +70,30 @@
                 <VBox spacing="10">
                     <Label text="Objects" styleClass="section-title"/>
                     <TextField fx:id="tableFilterField" promptText="Filter objects..."/>
-                    <ListView fx:id="tablesList" VBox.vgrow="ALWAYS"/>
+                    <TabPane fx:id="objectTypeTabs" tabClosingPolicy="UNAVAILABLE" VBox.vgrow="ALWAYS">
+                        <tabs>
+                            <Tab text="TABLE">
+                                <content>
+                                    <ListView fx:id="tableList" VBox.vgrow="ALWAYS"/>
+                                </content>
+                            </Tab>
+                            <Tab text="VIEW">
+                                <content>
+                                    <ListView fx:id="viewList" VBox.vgrow="ALWAYS"/>
+                                </content>
+                            </Tab>
+                            <Tab text="MVIEW">
+                                <content>
+                                    <ListView fx:id="mviewList" VBox.vgrow="ALWAYS"/>
+                                </content>
+                            </Tab>
+                            <Tab text="PROCEDURE">
+                                <content>
+                                    <ListView fx:id="procedureList" VBox.vgrow="ALWAYS"/>
+                                </content>
+                            </Tab>
+                        </tabs>
+                    </TabPane>
                 </VBox>
 
                 <VBox spacing="10">
@@ -73,8 +102,9 @@
                         <Region HBox.hgrow="ALWAYS"/>
                         <Button fx:id="loadPreviewButton" text="Load preview" onAction="#onLoadPreview"/>
                         <CheckBox fx:id="includeDmlCheck" text="Include data (INSERT)"/>
-                        <Button fx:id="exportButton" text="Export table" onAction="#onExport" styleClass="primary"/>
+                        <Button fx:id="exportButton" text="Export selected" onAction="#onExport" styleClass="primary"/>
                         <Button fx:id="exportAllButton" text="Export ALL" onAction="#onExportAll"/>
+                        <Button fx:id="importButton" text="Import" onAction="#onImport" />
                     </HBox>
 
                     <HBox spacing="10" alignment="CENTER_LEFT">
