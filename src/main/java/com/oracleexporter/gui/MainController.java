@@ -9,6 +9,7 @@ import com.oracleexporter.service.ImportService;
 import com.oracleexporter.service.MetadataService;
 import com.oracleexporter.util.ConfigUtil;
 import com.oracleexporter.util.DatabaseUtil;
+import com.oracleexporter.util.SavedCredentials;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleIntegerProperty;
@@ -30,8 +31,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Locale;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Properties;
 
 public class MainController {
@@ -40,6 +43,7 @@ public class MainController {
     private static final String CFG_PORT = "db.port";
     private static final String CFG_SERVICE = "db.service";
     private static final String CFG_USER = "db.user";
+    private static final String CFG_SAVE_PASSWORD = "db.password.save";
     private static final String CFG_EXPORT_DIR = "export.baseDir";
     private static final String CFG_IMPORT_DIR = "import.baseDir";
     private static final String CFG_DATA_MAX_ROWS = "export.data.maxRows";
@@ -50,8 +54,9 @@ public class MainController {
     @FXML private TextField hostField;
     @FXML private TextField portField;
     @FXML private TextField serviceField;
-    @FXML private TextField userField;
+    @FXML private ComboBox<String> userCombo;
     @FXML private PasswordField passwordField;
+    @FXML private CheckBox savePasswordCheck;
 
     @FXML private Button connectButton;
     @FXML private Button disconnectButton;
@@ -59,12 +64,8 @@ public class MainController {
     @FXML private Button browseExportFolderButton;
     @FXML private TextField importFolderField;
     @FXML private Button browseImportFolderButton;
-    @FXML private TextField tableFilterField;
-    @FXML private TabPane objectTypeTabs;
-    @FXML private ListView<DbObject> tableList;
-    @FXML private ListView<DbObject> viewList;
-    @FXML private ListView<DbObject> mviewList;
-    @FXML private ListView<DbObject> procedureList;
+    @FXML private ComboBox<String> objectTypeCombo;
+    @FXML private ListView<DbObject> objectList;
 
     @FXML private TableView<ColumnInfo> columnTable;
     @FXML private TableColumn<ColumnInfo, String> colName;
@@ -87,6 +88,7 @@ public class MainController {
     @FXML private ProgressBar progressBar;
     @FXML private Label statusLabel;
     @FXML private TextArea logArea;
+    @FXML private Button clearLogButton;
 
     private final MetadataService metadataService = new MetadataService();
     private final ExportService exportService = new ExportService();
@@ -100,17 +102,13 @@ public class MainController {
     private Path importDir;
     private boolean operationInProgress;
     private final ObservableList<DbObject> allObjects = FXCollections.observableArrayList();
-    private final ObservableList<DbObject> tableObjects = FXCollections.observableArrayList();
-    private final ObservableList<DbObject> viewObjects = FXCollections.observableArrayList();
-    private final ObservableList<DbObject> mviewObjects = FXCollections.observableArrayList();
-    private final ObservableList<DbObject> procedureObjects = FXCollections.observableArrayList();
-
-    private FilteredList<DbObject> filteredTables;
-    private FilteredList<DbObject> filteredViews;
-    private FilteredList<DbObject> filteredMviews;
-    private FilteredList<DbObject> filteredProcedures;
+    private FilteredList<DbObject> filteredObjects;
 
     private boolean updatingSelection;
+    private boolean suppressObjectTypeComboListener;
+    private boolean suppressCredentialSync;
+    /** Saved (user → password) pairs; order matches config file index order. */
+    private final LinkedHashMap<String, String> savedCredentials = new LinkedHashMap<>();
     private final Properties config = new Properties();
 
     @FXML
@@ -141,7 +139,6 @@ public class MainController {
         disconnectButton.setDisable(true);
         loadPreviewButton.setDisable(true);
         if (importButton != null) importButton.setDisable(true);
-        if (importButton != null) importButton.getStyleClass().add("accent");
 
         columnTable.setItems(FXCollections.observableArrayList());
         columnTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
@@ -158,32 +155,154 @@ public class MainController {
         colNullable.setCellFactory(tc -> new BoolBadgeCell("NULL", "NOT NULL"));
         colPk.setCellFactory(tc -> new BoolBadgeCell("PK", ""));
 
-        filteredTables = new FilteredList<>(tableObjects, o -> true);
-        filteredViews = new FilteredList<>(viewObjects, o -> true);
-        filteredMviews = new FilteredList<>(mviewObjects, o -> true);
-        filteredProcedures = new FilteredList<>(procedureObjects, o -> true);
+        filteredObjects = new FilteredList<>(allObjects, o -> true);
+        buildObjectTypeCombo();
+        refreshObjectTypeCombo();
 
-        setupObjectList(tableList, filteredTables);
-        setupObjectList(viewList, filteredViews);
-        setupObjectList(mviewList, filteredMviews);
-        setupObjectList(procedureList, filteredProcedures);
+        setupObjectList(objectList, filteredObjects);
+        if (objectList != null) {
+            objectList.setPlaceholder(new Label("Connect to database to view objects."));
+        }
+        if (columnTable != null) {
+            columnTable.setPlaceholder(new Label("Connect to database to view table structure."));
+        }
 
         hostField.textProperty().addListener((obs, o, n) -> saveFieldsToConfig());
         portField.textProperty().addListener((obs, o, n) -> saveFieldsToConfig());
         serviceField.textProperty().addListener((obs, o, n) -> saveFieldsToConfig());
-        userField.textProperty().addListener((obs, o, n) -> saveFieldsToConfig());
+        wireCredentialUi();
+        passwordField.textProperty().addListener((obs, o, n) -> {
+            if (suppressCredentialSync) {
+                return;
+            }
+            saveFieldsToConfig();
+        });
+        if (savePasswordCheck != null) {
+            savePasswordCheck.selectedProperty().addListener((obs, o, n) -> saveFieldsToConfig());
+        }
 
-        tableFilterField.textProperty().addListener((obs, oldV, newV) -> applyTableFilter(newV));
-
-        wireSelection(tableList);
-        wireSelection(viewList);
-        wireSelection(mviewList);
-        wireSelection(procedureList);
+        wireObjectSelection();
 
         setStatus("Ready.");
         progressBar.setProgress(0);
 
         refreshDataExportControlsState();
+        decorateToolbarButtons();
+    }
+
+    private void decorateToolbarButtons() {
+        if (connectButton != null) {
+            connectButton.setGraphic(textGraphic("🔗"));
+        }
+        if (disconnectButton != null) {
+            disconnectButton.setGraphic(textGraphic("⏻"));
+        }
+        if (browseExportFolderButton != null) {
+            browseExportFolderButton.setGraphic(textGraphic("📁"));
+        }
+        if (browseImportFolderButton != null) {
+            browseImportFolderButton.setGraphic(textGraphic("📁"));
+        }
+        if (loadPreviewButton != null) {
+            loadPreviewButton.setGraphic(textGraphic("👁"));
+        }
+        if (exportButton != null) {
+            exportButton.setGraphic(textGraphic("⬇"));
+        }
+        if (exportAllButton != null) {
+            exportAllButton.setGraphic(textGraphic("⬇"));
+        }
+        if (importButton != null) {
+            importButton.setGraphic(textGraphic("⬆"));
+        }
+    }
+
+    private static Label textGraphic(String symbol) {
+        Label g = new Label(symbol);
+        g.getStyleClass().add("btn-emoji-icon");
+        return g;
+    }
+
+    private void buildObjectTypeCombo() {
+        if (objectTypeCombo == null) {
+            return;
+        }
+        objectTypeCombo.setEditable(false);
+        objectTypeCombo.getItems().clear();
+        objectTypeCombo.getItems().add("All (0)");
+        for (DbObjectType t : DbObjectType.values()) {
+            objectTypeCombo.getItems().add(t.name() + " (0)");
+        }
+        objectTypeCombo.getSelectionModel().selectFirst();
+        objectTypeCombo.valueProperty().addListener((obs, o, n) -> {
+            if (suppressObjectTypeComboListener) {
+                return;
+            }
+            applyObjectFilter();
+            if (objectList != null) {
+                objectList.refresh();
+            }
+        });
+    }
+
+    /** Refreshes dropdown labels with counts from {@link #allObjects}, keeping the selected type. */
+    private void refreshObjectTypeCombo() {
+        if (objectTypeCombo == null) {
+            return;
+        }
+        String prevKey = getSelectedTypeFilterKey();
+        int total = allObjects.size();
+        int[] counts = new int[DbObjectType.values().length];
+        for (DbObject o : allObjects) {
+            if (o != null) {
+                counts[o.getType().ordinal()]++;
+            }
+        }
+        suppressObjectTypeComboListener = true;
+        try {
+            ObservableList<String> items = FXCollections.observableArrayList();
+            items.add("All (" + total + ")");
+            for (DbObjectType t : DbObjectType.values()) {
+                items.add(t.name() + " (" + counts[t.ordinal()] + ")");
+            }
+            objectTypeCombo.getItems().setAll(items);
+            selectObjectTypeComboByKey(prevKey);
+        } finally {
+            suppressObjectTypeComboListener = false;
+        }
+    }
+
+    private void selectObjectTypeComboByKey(String typeKey) {
+        if (objectTypeCombo == null) {
+            return;
+        }
+        String want = typeKey == null ? "All" : typeKey;
+        for (String item : objectTypeCombo.getItems()) {
+            if ("All".equals(want) && item.startsWith("All (")) {
+                objectTypeCombo.getSelectionModel().select(item);
+                return;
+            }
+            if (!"All".equals(want) && item.startsWith(want + " (")) {
+                objectTypeCombo.getSelectionModel().select(item);
+                return;
+            }
+        }
+        objectTypeCombo.getSelectionModel().selectFirst();
+    }
+
+    private String getSelectedTypeFilterKey() {
+        if (objectTypeCombo == null) {
+            return "All";
+        }
+        String v = objectTypeCombo.getValue();
+        if (v == null || v.startsWith("All (")) {
+            return "All";
+        }
+        int p = v.lastIndexOf(" (");
+        if (p <= 0) {
+            return "All";
+        }
+        return v.substring(0, p);
     }
 
     private void setupObjectList(ListView<DbObject> listView, FilteredList<DbObject> items) {
@@ -196,30 +315,29 @@ public class MainController {
                 super.updateItem(item, empty);
                 if (empty || item == null) {
                     setText(null);
+                    setGraphic(null);
                     return;
                 }
-                setText(item.getName());
+                setGraphic(null);
+                setText(formatObjectListRow(item));
             }
         });
     }
 
-    private void wireSelection(ListView<DbObject> lv) {
-        if (lv == null) return;
-        lv.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
+    private String formatObjectListRow(DbObject item) {
+        boolean allTypes = "All".equals(getSelectedTypeFilterKey());
+        if (allTypes) {
+            return item.getType() + "  " + item.getDisplayLabel();
+        }
+        return item.getDisplayLabel();
+    }
+
+    private void wireObjectSelection() {
+        if (objectList == null) return;
+        objectList.getSelectionModel().selectedItemProperty().addListener((obs, oldV, newV) -> {
             if (updatingSelection) return;
-            if (newV == null) return;
-
-            updatingSelection = true;
-            try {
-                if (lv != tableList && tableList != null) tableList.getSelectionModel().clearSelection();
-                if (lv != viewList && viewList != null) viewList.getSelectionModel().clearSelection();
-                if (lv != mviewList && mviewList != null) mviewList.getSelectionModel().clearSelection();
-                if (lv != procedureList && procedureList != null) procedureList.getSelectionModel().clearSelection();
-            } finally {
-                updatingSelection = false;
-            }
-
             selectedObject = newV;
+            if (newV == null) return;
             currentTable = null;
             columnTable.getItems().clear();
             disableWhileBusy(false);
@@ -232,6 +350,7 @@ public class MainController {
         p.setProperty(CFG_PORT, "1521");
         p.setProperty(CFG_SERVICE, "");
         p.setProperty(CFG_USER, "");
+        p.setProperty(CFG_SAVE_PASSWORD, "false");
         p.setProperty(CFG_EXPORT_DIR, "");
         p.setProperty(CFG_IMPORT_DIR, "");
         p.setProperty(CFG_DATA_MAX_ROWS, "100");
@@ -308,6 +427,13 @@ public class MainController {
     }
 
     @FXML
+    private void onClearLog() {
+        if (logArea != null) {
+            logArea.clear();
+        }
+    }
+
+    @FXML
     private void onConnect() {
         if (operationInProgress) return;
         if (isConnected()) {
@@ -327,7 +453,7 @@ public class MainController {
                 String host = hostField.getText();
                 int port = Integer.parseInt(portField.getText().trim());
                 String service = serviceField.getText();
-                String user = userField.getText();
+                String user = getUsername();
                 String pass = passwordField.getText();
 
                 Connection conn = DatabaseUtil.connect(host, port, service, user, pass);
@@ -343,17 +469,19 @@ public class MainController {
         task.setOnSucceeded(e -> {
             List<DbObject> objects = task.getValue();
             allObjects.setAll(objects);
-            rebuildTypeLists();
-            applyTableFilter(tableFilterField.getText());
+            refreshObjectTypeCombo();
+            applyObjectFilter();
             clearAllSelections();
             selectedObject = null;
             currentTable = null;
             connectedSchema = safeSchemaName(resolveCurrentSchema(connection));
             columnTable.getItems().clear();
-            setStatus("Connected. Loaded " + objects.size() + " objects.");
             setConnectedUi(true);
             operationInProgress = false;
             disableWhileBusy(false);
+            persistSavedCredentialsAfterSuccessfulConnect();
+            saveFieldsToConfig();
+            setStatus("Connected. Loaded " + objects.size() + " objects.");
         });
 
         task.setOnFailed(e -> {
@@ -374,11 +502,8 @@ public class MainController {
         disableWhileBusy(true);
         shutdown();
         allObjects.clear();
-        tableObjects.clear();
-        viewObjects.clear();
-        mviewObjects.clear();
-        procedureObjects.clear();
-        applyTableFilter(tableFilterField.getText());
+        refreshObjectTypeCombo();
+        applyObjectFilter();
         columnTable.getItems().clear();
         selectedObject = null;
         connectedSchema = null;
@@ -470,7 +595,7 @@ public class MainController {
         LocalDateTime now = LocalDateTime.now();
         String exportFolderName = connectedSchema + "_" + EXPORT_TS_FMT.format(now);
         Path exportRoot = exportBaseDir.resolve(exportFolderName);
-        Path typeRoot = exportRoot.resolve(typeFolder(obj.getType()));
+        Path typeRoot = exportRoot.resolve(ImportService.typeFolder(obj.getType()));
         Path ddlDir = typeRoot.resolve("ddl");
         Path dataDir = typeRoot.resolve("data");
 
@@ -488,12 +613,12 @@ public class MainController {
 
                 if (obj.getType() == DbObjectType.TABLE) {
                     TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
-                    Path ddlTarget = ddlDir.resolve(obj.getName() + ".sql");
+                    Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
                     updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
                     exportService.exportSql(tableInfo, ddlTarget);
 
                     if (includeDml) {
-                        Path dataTarget = dataDir.resolve(obj.getName() + ".sql");
+                        Path dataTarget = dataDir.resolve(obj.fileBaseName() + ".sql");
                         updateMessage("Exporting DATA to " + dataTarget.getFileName() + "...");
                         exportService.exportDataSql(connection, obj.getName(), dataTarget, dataMaxRows);
                     }
@@ -502,7 +627,7 @@ public class MainController {
                     if (ddl == null || ddl.isBlank()) {
                         throw new IllegalStateException("Could not load DDL for " + obj.getType() + " " + obj.getName());
                     }
-                    Path ddlTarget = ddlDir.resolve(obj.getName() + ".sql");
+                    Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
                     updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
                     exportService.exportRawSql(ddl, ddlTarget);
                 }
@@ -540,8 +665,7 @@ public class MainController {
             showError("Export folder not set", "Please choose an export folder first.");
             return;
         }
-        DbObjectType exportType = resolveSelectedTypeForExportAll();
-        List<DbObject> objectsToExport = resolveObjectsForType(exportType);
+        List<DbObject> objectsToExport = resolveObjectsForExportAll();
         if (objectsToExport.isEmpty()) {
             showError("No objects", "No objects loaded.");
             return;
@@ -556,9 +680,6 @@ public class MainController {
         LocalDateTime now = LocalDateTime.now();
         String exportFolderName = connectedSchema + "_" + EXPORT_TS_FMT.format(now);
         Path exportRoot = exportBaseDir.resolve(exportFolderName);
-        Path selectedTypeRoot = exportRoot.resolve(typeFolder(exportType));
-        Path ddlDir = selectedTypeRoot.resolve("ddl");
-        Path dataDir = selectedTypeRoot.resolve("data");
 
         operationInProgress = true;
         disableWhileBusy(true);
@@ -569,30 +690,33 @@ public class MainController {
                 updateMessage("Preparing export folders...");
                 updateProgress(0, objectsToExport.size());
 
-                Files.createDirectories(ddlDir);
-                Files.createDirectories(dataDir);
-
                 int total = objectsToExport.size();
                 for (int i = 0; i < total; i++) {
                     DbObject obj = objectsToExport.get(i);
                     if (obj == null) continue;
 
                     updateProgress(i, total);
-                    updateMessage("Exporting " + obj.getType() + " " + obj.getName() + " (" + (i + 1) + "/" + total + ")...");
+                    updateMessage("Exporting " + obj.getType() + " " + obj.getDisplayLabel() + " (" + (i + 1) + "/" + total + ")...");
+
+                    Path typeRoot = exportRoot.resolve(ImportService.typeFolder(obj.getType()));
+                    Path ddlDir = typeRoot.resolve("ddl");
+                    Path dataDir = typeRoot.resolve("data");
+                    Files.createDirectories(ddlDir);
+                    Files.createDirectories(dataDir);
 
                     if (obj.getType() == DbObjectType.TABLE) {
                         TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
-                        exportService.exportSql(tableInfo, ddlDir.resolve(obj.getName() + ".sql"));
+                        exportService.exportSql(tableInfo, ddlDir.resolve(obj.fileBaseName() + ".sql"));
 
                         if (includeDml) {
-                            exportService.exportDataSql(connection, obj.getName(), dataDir.resolve(obj.getName() + ".sql"), dataMaxRows);
+                            exportService.exportDataSql(connection, obj.getName(), dataDir.resolve(obj.fileBaseName() + ".sql"), dataMaxRows);
                         }
                     } else {
                         String ddl = metadataService.loadObjectDdl(connection, connectedSchema, obj);
                         if (ddl == null || ddl.isBlank()) {
-                            throw new IllegalStateException("Could not load DDL for " + obj.getType() + " " + obj.getName());
+                            throw new IllegalStateException("Could not load DDL for " + obj.getType() + " " + obj.getDisplayLabel());
                         }
-                        Path ddlTarget = ddlDir.resolve(obj.getName() + ".sql");
+                        Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
                         exportService.exportRawSql(ddl, ddlTarget);
                     }
                 }
@@ -642,9 +766,7 @@ public class MainController {
             protected Path call() throws Exception {
                 updateMessage("Checking schema is empty...");
                 updateProgress(-1, 1);
-                if (!metadataService.isSchemaEmpty(connection)) {
-                    throw new IllegalStateException("Target schema is not empty. Please use a new/empty schema.");
-                }
+                metadataService.requireSchemaEmptyForImport(connection);
 
                 updateMessage("Importing from folder...");
                 boolean prevAutoCommit = true;
@@ -687,24 +809,18 @@ public class MainController {
         new Thread(task, "import-task").start();
     }
 
-    private DbObjectType resolveSelectedTypeForExportAll() {
-        if (objectTypeTabs == null) return DbObjectType.TABLE;
-        int idx = objectTypeTabs.getSelectionModel().getSelectedIndex();
-        return switch (idx) {
-            case 1 -> DbObjectType.VIEW;
-            case 2 -> DbObjectType.MATERIALIZED_VIEW;
-            case 3 -> DbObjectType.PROCEDURE;
-            default -> DbObjectType.TABLE;
-        };
-    }
-
-    private List<DbObject> resolveObjectsForType(DbObjectType type) {
-        return switch (type) {
-            case TABLE -> List.copyOf(tableObjects);
-            case VIEW -> List.copyOf(viewObjects);
-            case MATERIALIZED_VIEW -> List.copyOf(mviewObjects);
-            case PROCEDURE -> List.copyOf(procedureObjects);
-        };
+    /** Objects to export when using Export ALL, respecting type filter and excluding empty list. */
+    private List<DbObject> resolveObjectsForExportAll() {
+        String typeKey = getSelectedTypeFilterKey();
+        if ("All".equals(typeKey)) {
+            return List.copyOf(allObjects);
+        }
+        try {
+            DbObjectType t = DbObjectType.valueOf(typeKey);
+            return allObjects.stream().filter(o -> o.getType() == t).toList();
+        } catch (IllegalArgumentException e) {
+            return List.copyOf(allObjects);
+        }
     }
 
     private void bindTask(Task<?> task) {
@@ -725,11 +841,8 @@ public class MainController {
         disconnectButton.setDisable(busy || !connected);
         browseExportFolderButton.setDisable(busy);
         if (browseImportFolderButton != null) browseImportFolderButton.setDisable(busy);
-        if (tableList != null) tableList.setDisable(busy || !connected);
-        if (viewList != null) viewList.setDisable(busy || !connected);
-        if (mviewList != null) mviewList.setDisable(busy || !connected);
-        if (procedureList != null) procedureList.setDisable(busy || !connected);
-        tableFilterField.setDisable(busy || !connected);
+        if (objectList != null) objectList.setDisable(busy || !connected);
+        if (objectTypeCombo != null) objectTypeCombo.setDisable(busy || !connected);
         loadPreviewButton.setDisable(busy || !connected || !hasTableSelection);
         exportButton.setDisable(busy || !connected || !hasSelection || !hasExportDir);
         exportAllButton.setDisable(busy || !connected || allObjects.isEmpty() || !hasExportDir);
@@ -741,8 +854,13 @@ public class MainController {
         hostField.setDisable(connected);
         portField.setDisable(connected);
         serviceField.setDisable(connected);
-        userField.setDisable(connected);
+        if (userCombo != null) {
+            userCombo.setDisable(connected);
+        }
         passwordField.setDisable(connected);
+        if (savePasswordCheck != null) {
+            savePasswordCheck.setDisable(connected);
+        }
         disableWhileBusy(false);
     }
 
@@ -754,62 +872,54 @@ public class MainController {
         }
     }
 
-    private void applyTableFilter(String filter) {
-        String f = filter == null ? "" : filter.trim().toUpperCase(Locale.ROOT);
-        java.util.function.Predicate<DbObject> pred = o -> {
-            if (o == null) return false;
-            if (f.isEmpty()) return true;
-            return o.getName().toUpperCase(Locale.ROOT).contains(f)
-                    || o.getType().name().toUpperCase(Locale.ROOT).contains(f);
-        };
-        filteredTables.setPredicate(pred);
-        filteredViews.setPredicate(pred);
-        filteredMviews.setPredicate(pred);
-        filteredProcedures.setPredicate(pred);
-    }
-
-    private void rebuildTypeLists() {
-        tableObjects.clear();
-        viewObjects.clear();
-        mviewObjects.clear();
-        procedureObjects.clear();
-        for (DbObject o : allObjects) {
-            if (o == null) continue;
-            switch (o.getType()) {
-                case TABLE -> tableObjects.add(o);
-                case VIEW -> viewObjects.add(o);
-                case MATERIALIZED_VIEW -> mviewObjects.add(o);
-                case PROCEDURE -> procedureObjects.add(o);
+    private void applyObjectFilter() {
+        String typeKey = getSelectedTypeFilterKey();
+        filteredObjects.setPredicate(o -> {
+            if (o == null) {
+                return false;
             }
-        }
+            if (!"All".equals(typeKey) && !o.getType().name().equals(typeKey)) {
+                return false;
+            }
+            return true;
+        });
     }
 
     private void clearAllSelections() {
         updatingSelection = true;
         try {
-            if (tableList != null) tableList.getSelectionModel().clearSelection();
-            if (viewList != null) viewList.getSelectionModel().clearSelection();
-            if (mviewList != null) mviewList.getSelectionModel().clearSelection();
-            if (procedureList != null) procedureList.getSelectionModel().clearSelection();
+            if (objectList != null) objectList.getSelectionModel().clearSelection();
         } finally {
             updatingSelection = false;
         }
-    }
-
-    private static String typeFolder(DbObjectType type) {
-        return switch (type) {
-            case TABLE -> "table";
-            case VIEW -> "view";
-            case MATERIALIZED_VIEW -> "materialized_view";
-            case PROCEDURE -> "procedure";
-        };
     }
 
     private void loadConfigToFields() {
         hostField.setText(config.getProperty(CFG_HOST, ""));
         portField.setText(config.getProperty(CFG_PORT, "1521"));
         serviceField.setText(config.getProperty(CFG_SERVICE, ""));
-        userField.setText(config.getProperty(CFG_USER, ""));
+
+        SavedCredentials.readInto(savedCredentials, config);
+        refreshUserComboItems();
+        String lastUser = config.getProperty(CFG_USER, "");
+        suppressCredentialSync = true;
+        try {
+            if (userCombo != null) {
+                userCombo.getEditor().setText(lastUser);
+            }
+            String key = lastUser.trim();
+            if (savedCredentials.containsKey(key)) {
+                passwordField.setText(savedCredentials.get(key));
+            } else {
+                passwordField.clear();
+            }
+            boolean savePwd = Boolean.parseBoolean(config.getProperty(CFG_SAVE_PASSWORD, "false"));
+            if (savePasswordCheck != null) {
+                savePasswordCheck.setSelected(savePwd);
+            }
+        } finally {
+            suppressCredentialSync = false;
+        }
 
         String exportDir = config.getProperty(CFG_EXPORT_DIR, "");
         if (!exportDir.isBlank()) {
@@ -834,11 +944,19 @@ public class MainController {
         maxDataRowsSpinner.getValueFactory().setValue(maxRows);
     }
 
+    /**
+     * Persists non-credential settings. User/password pairs are written only after a successful connect
+     * (see {@link #persistSavedCredentialsAfterSuccessfulConnect()}).
+     */
     private void saveFieldsToConfig() {
         config.setProperty(CFG_HOST, nv(hostField.getText()).trim());
         config.setProperty(CFG_PORT, nv(portField.getText()).trim());
         config.setProperty(CFG_SERVICE, nv(serviceField.getText()).trim());
-        config.setProperty(CFG_USER, nv(userField.getText()).trim());
+        String user = getUsername();
+        config.setProperty(CFG_USER, user);
+        boolean savePwd = savePasswordCheck != null && savePasswordCheck.isSelected();
+        config.setProperty(CFG_SAVE_PASSWORD, Boolean.toString(savePwd));
+
         if (exportBaseDir != null) {
             config.setProperty(CFG_EXPORT_DIR, exportBaseDir.toString());
         }
@@ -848,6 +966,75 @@ public class MainController {
         config.setProperty(CFG_DATA_ALL_ROWS, Boolean.toString(exportAllDataCheck.isSelected()));
         config.setProperty(CFG_DATA_MAX_ROWS, Integer.toString(maxDataRowsSpinner.getValue()));
         ConfigUtil.save(config);
+    }
+
+    /** Call only after {@link DatabaseUtil#connect} and metadata load succeed. */
+    private void persistSavedCredentialsAfterSuccessfulConnect() {
+        if (savePasswordCheck == null || !savePasswordCheck.isSelected()) {
+            return;
+        }
+        String user = getUsername();
+        if (user.isEmpty()) {
+            return;
+        }
+        savedCredentials.put(user, passwordField.getText() == null ? "" : passwordField.getText());
+        SavedCredentials.writeMap(config, savedCredentials);
+        config.remove("db.password");
+        refreshUserComboItems();
+    }
+
+    private String getUsername() {
+        if (userCombo == null) {
+            return "";
+        }
+        return nv(userCombo.getEditor().getText()).trim();
+    }
+
+    private void refreshUserComboItems() {
+        if (userCombo == null) {
+            return;
+        }
+        userCombo.getItems().setAll(new ArrayList<>(savedCredentials.keySet()));
+    }
+
+    private void wireCredentialUi() {
+        if (userCombo == null) {
+            return;
+        }
+        userCombo.setEditable(true);
+        userCombo.valueProperty().addListener((obs, o, n) -> {
+            if (suppressCredentialSync || n == null || n.isBlank()) {
+                return;
+            }
+            String u = n.trim();
+            if (savedCredentials.containsKey(u)) {
+                applyPasswordForSavedUser(u);
+            }
+            saveFieldsToConfig();
+        });
+        userCombo.getEditor().textProperty().addListener((obs, o, n) -> {
+            if (suppressCredentialSync) {
+                return;
+            }
+            String u = n == null ? "" : n.trim();
+            if (!u.isEmpty() && savedCredentials.containsKey(u)) {
+                applyPasswordForSavedUser(u);
+            }
+        });
+        userCombo.getEditor().focusedProperty().addListener((obs, was, focused) -> {
+            if (!focused && !suppressCredentialSync) {
+                saveFieldsToConfig();
+            }
+        });
+    }
+
+    private void applyPasswordForSavedUser(String user) {
+        suppressCredentialSync = true;
+        try {
+            passwordField.setText(savedCredentials.get(user));
+        } finally {
+            suppressCredentialSync = false;
+        }
     }
 
     private static int parsePositiveInt(String raw, int fallback) {
@@ -932,6 +1119,10 @@ public class MainController {
     }
 
     private DbObject getSelectedObject() {
+        if (objectList != null) {
+            DbObject fromList = objectList.getSelectionModel().getSelectedItem();
+            if (fromList != null) return fromList;
+        }
         return selectedObject;
     }
 

@@ -5,124 +5,126 @@
 <?import javafx.scene.layout.*?>
 
 <BorderPane xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
-            fx:controller="com.oracleexporter.gui.MainController">
+            fx:controller="com.oracleexporter.gui.MainController"
+            styleClass="app-root">
 
     <top>
-        <VBox spacing="10" styleClass="top-pane" BorderPane.alignment="CENTER">
+        <VBox spacing="12" styleClass="app-header-wrap">
             <padding>
-                <Insets top="14" right="14" bottom="10" left="14"/>
+                <Insets top="16" right="18" bottom="8" left="18"/>
             </padding>
 
-            <Label text="OracleSchemaExporter" styleClass="app-title"/>
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <Label text="🗄" styleClass="app-icon-emoji"/>
+                <Label text="Oracle Schema Exporter" styleClass="app-title"/>
+            </HBox>
 
-            <GridPane hgap="10" vgap="10">
-                <columnConstraints>
-                    <ColumnConstraints minWidth="80" halignment="RIGHT"/>
-                    <ColumnConstraints hgrow="ALWAYS" minWidth="140"/>
-                    <ColumnConstraints minWidth="60" halignment="RIGHT"/>
-                    <ColumnConstraints hgrow="ALWAYS" minWidth="140"/>
-                    <ColumnConstraints minWidth="80" halignment="RIGHT"/>
-                    <ColumnConstraints hgrow="ALWAYS" minWidth="140"/>
-                </columnConstraints>
+            <!-- Connection -->
+            <VBox styleClass="card" spacing="10">
+                <padding>
+                    <Insets top="14" right="16" bottom="14" left="16"/>
+                </padding>
+                <GridPane hgap="12" vgap="10">
+                    <columnConstraints>
+                        <ColumnConstraints minWidth="72" halignment="RIGHT"/>
+                        <ColumnConstraints hgrow="ALWAYS" minWidth="120"/>
+                        <ColumnConstraints minWidth="52" halignment="RIGHT"/>
+                        <ColumnConstraints hgrow="ALWAYS" minWidth="120"/>
+                        <ColumnConstraints minWidth="64" halignment="RIGHT"/>
+                        <ColumnConstraints hgrow="ALWAYS" minWidth="120"/>
+                    </columnConstraints>
 
-                <Label text="Host" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
-                <TextField fx:id="hostField" promptText="localhost" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
+                    <Label text="Host" styleClass="field-label" GridPane.rowIndex="0" GridPane.columnIndex="0"/>
+                    <TextField fx:id="hostField" promptText="localhost" GridPane.rowIndex="0" GridPane.columnIndex="1"/>
 
-                <Label text="Port" GridPane.rowIndex="0" GridPane.columnIndex="2"/>
-                <TextField fx:id="portField" promptText="1521" GridPane.rowIndex="0" GridPane.columnIndex="3"/>
+                    <Label text="Port" styleClass="field-label" GridPane.rowIndex="0" GridPane.columnIndex="2"/>
+                    <TextField fx:id="portField" promptText="1521" GridPane.rowIndex="0" GridPane.columnIndex="3"/>
 
-                <Label text="Service" GridPane.rowIndex="0" GridPane.columnIndex="4"/>
-                <TextField fx:id="serviceField" promptText="ORCLPDB1" GridPane.rowIndex="0" GridPane.columnIndex="5"/>
+                    <Label text="Service" styleClass="field-label" GridPane.rowIndex="0" GridPane.columnIndex="4"/>
+                    <TextField fx:id="serviceField" promptText="ORCLPDB1" GridPane.rowIndex="0" GridPane.columnIndex="5"/>
 
-                <Label text="User" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
-                <TextField fx:id="userField" promptText="SCOTT" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
+                    <Label text="User" styleClass="field-label" GridPane.rowIndex="1" GridPane.columnIndex="0"/>
+                    <ComboBox fx:id="userCombo" editable="true" promptText="SCOTT" styleClass="user-combo" GridPane.rowIndex="1" GridPane.columnIndex="1"/>
 
-                <Label text="Password" GridPane.rowIndex="1" GridPane.columnIndex="2"/>
-                <PasswordField fx:id="passwordField" promptText="******" GridPane.rowIndex="1" GridPane.columnIndex="3"/>
+                    <Label text="Password" styleClass="field-label" GridPane.rowIndex="1" GridPane.columnIndex="2"/>
+                    <PasswordField fx:id="passwordField" promptText="••••••" GridPane.rowIndex="1" GridPane.columnIndex="3"/>
 
-                <HBox spacing="10" GridPane.rowIndex="1" GridPane.columnIndex="4" GridPane.columnSpan="2">
-                    <Button fx:id="connectButton" text="Connect" onAction="#onConnect" styleClass="primary"/>
-                    <Button fx:id="disconnectButton" text="Disconnect" onAction="#onDisconnect"/>
+                    <HBox spacing="10" alignment="CENTER_LEFT" GridPane.rowIndex="1" GridPane.columnIndex="4" GridPane.columnSpan="2">
+                        <Button fx:id="connectButton" text="Connect" onAction="#onConnect" styleClass="btn-connect" minWidth="120"/>
+                        <Button fx:id="disconnectButton" text="Disconnect" onAction="#onDisconnect" styleClass="btn-disconnect"/>
+                    </HBox>
+
+                    <CheckBox fx:id="savePasswordCheck" text="Save user &amp; password" GridPane.rowIndex="2" GridPane.columnIndex="0" GridPane.columnSpan="6"/>
+                </GridPane>
+            </VBox>
+
+            <!-- Paths: single row -->
+            <VBox styleClass="card" spacing="0">
+                <padding>
+                    <Insets top="10" right="16" bottom="10" left="16"/>
+                </padding>
+                <HBox spacing="10" alignment="CENTER_LEFT">
+                    <Label text="Export" styleClass="field-label" minWidth="48"/>
+                    <TextField fx:id="exportFolderField" promptText="Folder to save exports…" editable="false" HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="browseExportFolderButton" text="Browse…" onAction="#onBrowseExportFolder" styleClass="btn-browse"/>
+                    <Label text="Import" styleClass="field-label" minWidth="44"/>
+                    <TextField fx:id="importFolderField" promptText="Folder to import from…" editable="false" HBox.hgrow="ALWAYS"/>
+                    <Button fx:id="browseImportFolderButton" text="Browse…" onAction="#onBrowseImportFolder" styleClass="btn-browse"/>
                 </HBox>
-
-                <Label text="Export folder" GridPane.rowIndex="2" GridPane.columnIndex="0"/>
-                <HBox spacing="10" GridPane.rowIndex="2" GridPane.columnIndex="1" GridPane.columnSpan="5">
-                    <TextField fx:id="exportFolderField" promptText="Choose a folder to save exports..." editable="false" HBox.hgrow="ALWAYS"/>
-                    <Button fx:id="browseExportFolderButton" text="Browse..." onAction="#onBrowseExportFolder"/>
-                </HBox>
-
-                <Label text="Import folder" GridPane.rowIndex="3" GridPane.columnIndex="0"/>
-                <HBox spacing="10" GridPane.rowIndex="3" GridPane.columnIndex="1" GridPane.columnSpan="5">
-                    <TextField fx:id="importFolderField" promptText="Choose an export folder to import..." editable="false" HBox.hgrow="ALWAYS"/>
-                    <Button fx:id="browseImportFolderButton" text="Browse..." onAction="#onBrowseImportFolder"/>
-                </HBox>
-            </GridPane>
+            </VBox>
         </VBox>
     </top>
 
     <center>
-        <SplitPane dividerPositions="0.28">
+        <SplitPane dividerPositions="0.24" styleClass="main-split">
             <padding>
-                <Insets top="12" right="14" bottom="12" left="14"/>
+                <Insets top="8" right="18" bottom="8" left="18"/>
             </padding>
 
             <items>
-                <VBox spacing="10">
-                    <Label text="Objects" styleClass="section-title"/>
-                    <TextField fx:id="tableFilterField" promptText="Filter objects..."/>
-                    <TabPane fx:id="objectTypeTabs" tabClosingPolicy="UNAVAILABLE" VBox.vgrow="ALWAYS">
-                        <tabs>
-                            <Tab text="TABLE">
-                                <content>
-                                    <ListView fx:id="tableList" VBox.vgrow="ALWAYS"/>
-                                </content>
-                            </Tab>
-                            <Tab text="VIEW">
-                                <content>
-                                    <ListView fx:id="viewList" VBox.vgrow="ALWAYS"/>
-                                </content>
-                            </Tab>
-                            <Tab text="MVIEW">
-                                <content>
-                                    <ListView fx:id="mviewList" VBox.vgrow="ALWAYS"/>
-                                </content>
-                            </Tab>
-                            <Tab text="PROCEDURE">
-                                <content>
-                                    <ListView fx:id="procedureList" VBox.vgrow="ALWAYS"/>
-                                </content>
-                            </Tab>
-                        </tabs>
-                    </TabPane>
+                <!-- Objects -->
+                <VBox spacing="8" styleClass="card object-list-pane" maxHeight="Infinity" maxWidth="420">
+                    <padding>
+                        <Insets top="10" right="10" bottom="10" left="10"/>
+                    </padding>
+                    <HBox spacing="8" alignment="CENTER_LEFT">
+                        <Label text="Objects" styleClass="section-title"/>
+                        <Region HBox.hgrow="ALWAYS" minWidth="4"/>
+                        <Label text="Type" styleClass="field-label"/>
+                        <ComboBox fx:id="objectTypeCombo" styleClass="object-type-combo" prefWidth="140" maxWidth="180"/>
+                    </HBox>
+                    <ListView fx:id="objectList" VBox.vgrow="ALWAYS" minHeight="260"/>
                 </VBox>
 
-                <VBox spacing="10">
-                    <HBox spacing="10" alignment="CENTER_LEFT">
-                        <Label text="Preview" styleClass="section-title"/>
-                        <Region HBox.hgrow="ALWAYS"/>
-                        <Button fx:id="loadPreviewButton" text="Load preview" onAction="#onLoadPreview"/>
+                <!-- Preview -->
+                <VBox spacing="10" styleClass="card preview-pane" maxHeight="Infinity" minWidth="480">
+                    <padding>
+                        <Insets top="12" right="12" bottom="12" left="12"/>
+                    </padding>
+                    <HBox spacing="10" alignment="CENTER_LEFT" styleClass="preview-toolbar">
+                        <Label text="Preview" styleClass="section-title" minWidth="72"/>
+                        <Region HBox.hgrow="ALWAYS" minWidth="8"/>
+                        <Button fx:id="loadPreviewButton" text="Load preview" onAction="#onLoadPreview" styleClass="btn-toolbar"/>
                         <CheckBox fx:id="includeDmlCheck" text="Include data (INSERT)"/>
-                        <Button fx:id="exportButton" text="Export selected" onAction="#onExport" styleClass="primary"/>
-                        <Button fx:id="exportAllButton" text="Export ALL" onAction="#onExportAll"/>
-                        <Button fx:id="importButton" text="Import" onAction="#onImport" />
+                        <Button fx:id="exportButton" text="Export selected" onAction="#onExport" styleClass="btn-toolbar-primary"/>
+                        <Button fx:id="exportAllButton" text="Export ALL" onAction="#onExportAll" styleClass="btn-toolbar"/>
+                        <Button fx:id="importButton" text="Import" onAction="#onImport" styleClass="btn-toolbar-accent"/>
                     </HBox>
-
-                    <HBox spacing="10" alignment="CENTER_LEFT">
-                        <Label text="Max data rows per table"/>
-                        <Spinner fx:id="maxDataRowsSpinner" prefWidth="110" editable="true"/>
+                    <HBox spacing="12" alignment="CENTER_LEFT">
+                        <Label text="Max data rows per table" styleClass="field-label-inline"/>
+                        <Spinner fx:id="maxDataRowsSpinner" prefWidth="100" editable="true"/>
                         <CheckBox fx:id="exportAllDataCheck" text="Export all rows"/>
                         <Region HBox.hgrow="ALWAYS"/>
                     </HBox>
-
-                    <TableView fx:id="columnTable" VBox.vgrow="ALWAYS">
+                    <TableView fx:id="columnTable" VBox.vgrow="ALWAYS" minHeight="120">
                         <columns>
                             <TableColumn fx:id="colName" text="Column"/>
                             <TableColumn fx:id="colType" text="Type"/>
-                            <TableColumn fx:id="colLen" text="Len" maxWidth="80"/>
-                            <TableColumn fx:id="colPrec" text="Prec" maxWidth="80"/>
-                            <TableColumn fx:id="colScale" text="Scale" maxWidth="80"/>
-                            <TableColumn fx:id="colNullable" text="Nullable" maxWidth="110"/>
-                            <TableColumn fx:id="colPk" text="PK" maxWidth="70"/>
+                            <TableColumn fx:id="colLen" text="Len" maxWidth="72"/>
+                            <TableColumn fx:id="colPrec" text="Prec" maxWidth="72"/>
+                            <TableColumn fx:id="colScale" text="Scale" maxWidth="72"/>
+                            <TableColumn fx:id="colNullable" text="Nullable" maxWidth="100"/>
+                            <TableColumn fx:id="colPk" text="PK" maxWidth="64"/>
                             <TableColumn fx:id="colComment" text="Comment"/>
                         </columns>
                     </TableView>
@@ -132,17 +134,21 @@
     </center>
 
     <bottom>
-        <VBox styleClass="status-bar">
+        <VBox styleClass="log-panel" spacing="8">
             <padding>
-                <Insets top="10" right="14" bottom="12" left="14"/>
+                <Insets top="10" right="18" bottom="14" left="18"/>
             </padding>
             <HBox spacing="12" alignment="CENTER_LEFT">
-                <ProgressBar fx:id="progressBar" prefWidth="220"/>
-                <Label fx:id="statusLabel" text="Ready."/>
+                <Label text="&gt;_ Import / Export Log" styleClass="log-title"/>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button fx:id="clearLogButton" text="Clear" onAction="#onClearLog" styleClass="btn-log-clear"/>
             </HBox>
-            <TextArea fx:id="logArea" promptText="Import/Export log..." prefRowCount="6" wrapText="false" editable="false"/>
+            <HBox spacing="12" alignment="CENTER_LEFT">
+                <ProgressBar fx:id="progressBar" prefWidth="200"/>
+                <Label fx:id="statusLabel" text="Ready." styleClass="status-inline"/>
+            </HBox>
+            <TextArea fx:id="logArea" wrapText="false" editable="false" prefRowCount="4" styleClass="log-text"/>
         </VBox>
     </bottom>
 
 </BorderPane>
-

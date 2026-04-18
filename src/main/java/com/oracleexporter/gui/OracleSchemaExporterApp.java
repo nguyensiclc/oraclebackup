@@ -12,9 +12,9 @@ public class OracleSchemaExporterApp extends Application {
     @Override
     public void start(Stage stage) throws IOException {
         FXMLLoader loader = new FXMLLoader(OracleSchemaExporterApp.class.getResource("/fxml/main-view.fxml"));
-        Scene scene = new Scene(loader.load(), 1100, 720);
+        Scene scene = new Scene(loader.load(), 1100, 800);
         scene.getStylesheets().add(OracleSchemaExporterApp.class.getResource("/css/app.css").toExternalForm());
-        stage.setTitle("OracleSchemaExporter");
+        stage.setTitle("Oracle Schema Exporter");
         stage.setScene(scene);
         MainController controller = loader.getController();
         stage.setOnCloseRequest(e -> controller.shutdown());

@@ -8,6 +8,195 @@
     -fx-faint-focus-color: rgba(249,115,22,0.18);
 }
 
+.app-root {
+    -fx-background-color: #0b1220;
+}
+
+.app-header-wrap {
+    -fx-background-color: linear-gradient(to bottom, #0f172a 0%, #0b1220 100%);
+}
+
+.app-icon-emoji {
+    -fx-font-size: 26px;
+    -fx-padding: 0 4 0 0;
+}
+
+/* Rounded panels */
+.card {
+    -fx-background-color: rgba(255, 255, 255, 0.04);
+    -fx-background-radius: 14;
+    -fx-border-color: rgba(255, 255, 255, 0.09);
+    -fx-border-radius: 14;
+    -fx-border-width: 1;
+}
+
+.field-label {
+    -fx-text-fill: #94a3b8;
+    -fx-font-size: 12px;
+    -fx-font-weight: 600;
+}
+
+.field-label-inline {
+    -fx-text-fill: #94a3b8;
+    -fx-font-size: 12px;
+}
+
+.filter-icon {
+    -fx-font-size: 14px;
+    -fx-padding: 0 2 0 0;
+}
+
+/* Object type filter: All (n) / TYPE (n); popup uses .combo-box-popup rules below */
+.object-type-combo {
+    -fx-font-weight: 600;
+}
+
+.user-combo {
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+}
+
+.btn-connect {
+    -fx-background-color: #2563eb;
+    -fx-text-fill: #f8fafc;
+    -fx-border-color: rgba(255, 255, 255, 0.2);
+    -fx-font-weight: 700;
+    -fx-padding: 10 18;
+}
+
+.btn-connect:hover {
+    -fx-background-color: #1d4ed8;
+}
+
+.btn-disconnect {
+    -fx-background-color: rgba(255, 255, 255, 0.07);
+    -fx-text-fill: #e2e8f0;
+}
+
+.btn-browse {
+    -fx-min-width: 96;
+}
+
+.btn-emoji-icon {
+    -fx-font-size: 14px;
+    -fx-padding: 0 6 0 0;
+}
+
+.main-split {
+    -fx-background-color: #0b1220;
+    -fx-padding: 0;
+}
+
+.main-split > .split-pane-divider {
+    -fx-background-color: rgba(255, 255, 255, 0.07);
+}
+
+/* Object type tabs: orange selection like reference UI */
+.object-tabs {
+    -fx-background-color: transparent;
+}
+
+.object-tabs .tab-header-area .tab-header-background {
+    -fx-background-color: rgba(0, 0, 0, 0.2);
+    -fx-background-radius: 10 10 0 0;
+}
+
+.object-tabs .tab {
+    -fx-background-color: rgba(255, 255, 255, 0.06);
+    -fx-background-radius: 10 10 0 0;
+    -fx-border-color: rgba(255, 255, 255, 0.1);
+    -fx-padding: 8 12 8 10;
+}
+
+.object-tabs .tab:selected {
+    -fx-background-color: rgba(249, 115, 22, 0.35);
+    -fx-border-color: rgba(249, 115, 22, 0.65);
+}
+
+.object-tabs .tab:selected .tab-label {
+    -fx-text-fill: #ffedd5;
+}
+
+.object-tabs .tab .tab-label {
+    -fx-font-size: 11px;
+}
+
+/* Preview: enough room for full button labels (object list pane is intentionally narrow) */
+.preview-toolbar {
+    -fx-spacing: 10;
+}
+
+.preview-toolbar .button {
+    -fx-wrap-text: false;
+}
+
+.object-list-pane {
+    -fx-min-width: 0;
+}
+
+.btn-toolbar {
+    -fx-background-color: rgba(255, 255, 255, 0.07);
+    -fx-text-fill: #e2e8f0;
+    -fx-padding: 8 12;
+}
+
+.btn-toolbar-primary {
+    -fx-background-color: #2563eb;
+    -fx-text-fill: #f8fafc;
+    -fx-padding: 8 14;
+}
+
+.btn-toolbar-primary:hover {
+    -fx-background-color: #1d4ed8;
+}
+
+.btn-toolbar-accent {
+    -fx-background-color: #f97316;
+    -fx-text-fill: #0f172a;
+    -fx-font-weight: 700;
+    -fx-padding: 8 14;
+}
+
+.btn-toolbar-accent:hover {
+    -fx-background-color: #fb923c;
+}
+
+/* Log */
+.log-panel {
+    -fx-background-color: rgba(0, 0, 0, 0.25);
+    -fx-border-color: rgba(255, 255, 255, 0.08);
+    -fx-border-width: 1 0 0 0;
+}
+
+.log-title {
+    -fx-text-fill: #94a3b8;
+    -fx-font-family: Consolas, "Segoe UI Mono", monospace;
+    -fx-font-size: 13px;
+    -fx-font-weight: 700;
+}
+
+.btn-log-clear {
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+    -fx-text-fill: #cbd5e1;
+    -fx-padding: 4 14;
+    -fx-font-size: 12px;
+}
+
+.log-text {
+    -fx-control-inner-background: #0f1629;
+    -fx-font-family: Consolas, "Segoe UI Mono", monospace;
+    -fx-font-size: 12px;
+    -fx-text-fill: #cbd5e1;
+    -fx-background-radius: 10;
+    -fx-border-radius: 10;
+    -fx-border-color: rgba(255, 255, 255, 0.1);
+}
+
+.status-inline {
+    -fx-text-fill: #94a3b8;
+    -fx-font-size: 12px;
+}
+
 .top-pane {
     -fx-background-color: linear-gradient(to right, #0b1220, #0f1a33);
     -fx-border-color: rgba(255,255,255,0.06);
@@ -173,5 +362,61 @@
 
 .badge-gray {
     -fx-background-color: #94a3b8;
+}
+
+/* ComboBox dropdown: solid stack so list items do not visually merge with the object ListView behind */
+.root .combo-box-popup {
+    -fx-opacity: 1;
+    -fx-background-color: #1a2336;
+}
+
+.root .combo-box-popup > .list-view {
+    -fx-background-color: #1a2336;
+    -fx-control-inner-background: #1a2336;
+    -fx-border-color: rgba(255, 255, 255, 0.28);
+    -fx-border-width: 1;
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+    -fx-padding: 2;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.82), 24, 0.2, 0, 8);
+}
+
+.root .combo-box-popup .virtual-flow,
+.root .combo-box-popup .virtual-flow .clipped-container,
+.root .combo-box-popup .virtual-flow .sheet {
+    -fx-background-color: #1a2336;
+}
+
+.root .combo-box-popup .scroll-pane {
+    -fx-background-color: #1a2336;
+    -fx-background-insets: 0;
+}
+
+.root .combo-box-popup .scroll-pane > .viewport {
+    -fx-background-color: #1a2336;
+}
+
+.root .combo-box-popup .list-cell {
+    -fx-background-color: #1a2336;
+    -fx-text-fill: #f1f5f9;
+}
+
+.root .combo-box-popup .list-cell:hover {
+    -fx-background-color: rgba(249, 115, 22, 0.38);
+}
+
+.root .combo-box-popup .list-cell:selected {
+    -fx-background-color: rgba(249, 115, 22, 0.5);
+    -fx-text-fill: #fffbeb;
+}
+
+.root .combo-box-popup .scroll-bar:vertical {
+    -fx-background-color: #141c2e;
+}
+.root .combo-box-popup .scroll-bar:vertical .track {
+    -fx-background-color: rgba(255, 255, 255, 0.08);
+}
+.root .combo-box-popup .scroll-bar:vertical .thumb {
+    -fx-background-color: rgba(255, 255, 255, 0.28);
 }
 

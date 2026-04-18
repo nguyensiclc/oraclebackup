@@ -54,6 +54,80 @@ public final class SqlScriptRunner {
     }
 
     /**
+     * Runs a SQL script file, batching {@code INSERT} statements to reduce round-trips.
+     * Other statements (e.g. {@code COMMIT}) are executed immediately after flushing any pending inserts.
+     *
+     * @param insertBatchSize max inserts per {@link Statement#executeBatch()}; if {@code <= 0}, delegates to {@link #runFile}.
+     */
+    public static void runFileWithInsertBatch(Connection connection, Path file, int insertBatchSize) throws IOException, SQLException {
+        if (connection == null) throw new IllegalArgumentException("connection is null");
+        if (file == null) throw new IllegalArgumentException("file is null");
+        if (insertBatchSize <= 0) {
+            runFile(connection, file);
+            return;
+        }
+        String sql = Files.readString(file, StandardCharsets.UTF_8);
+        runSqlWithInsertBatch(connection, sql, insertBatchSize);
+    }
+
+    /**
+     * Like {@link #runSql} but batches consecutive {@code INSERT} statements.
+     */
+    public static void runSqlWithInsertBatch(Connection connection, String script, int insertBatchSize) throws SQLException {
+        if (connection == null) throw new IllegalArgumentException("connection is null");
+        if (script == null) throw new IllegalArgumentException("script is null");
+        if (insertBatchSize <= 0) {
+            runSql(connection, script);
+            return;
+        }
+
+        List<String> statements = splitStatements(script);
+        try (Statement st = connection.createStatement()) {
+            int pending = 0;
+            for (String s : statements) {
+                String trimmed = s.trim();
+                if (trimmed.isEmpty()) continue;
+
+                String effective = stripLeadingCommentsAndBlankLines(trimmed);
+                if (effective.isEmpty()) continue;
+
+                String u = effective.toUpperCase(Locale.ROOT);
+                if (u.startsWith("SET ")
+                        || u.startsWith("SPOOL ")
+                        || u.equals("SPOOL")
+                        || u.startsWith("PROMPT ")
+                        || u.equals("PROMPT")
+                        || u.equals("EXIT")
+                        || u.equals("QUIT")) {
+                    continue;
+                }
+
+                String jdbcSql = stripTrailingStatementDelimiter(effective);
+                if (jdbcSql.isEmpty()) continue;
+
+                String kind = jdbcSql.trim().toUpperCase(Locale.ROOT);
+                if (kind.startsWith("INSERT")) {
+                    st.addBatch(jdbcSql);
+                    pending++;
+                    if (pending >= insertBatchSize) {
+                        st.executeBatch();
+                        pending = 0;
+                    }
+                } else {
+                    if (pending > 0) {
+                        st.executeBatch();
+                        pending = 0;
+                    }
+                    st.execute(jdbcSql);
+                }
+            }
+            if (pending > 0) {
+                st.executeBatch();
+            }
+        }
+    }
+
+    /**
      * JDBC expects raw SQL without SQL*Plus terminators.
      * Our splitter keeps ';' as part of statement, so strip it here.
      */
