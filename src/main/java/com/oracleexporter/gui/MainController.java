@@ -20,6 +20,8 @@ import javafx.collections.transformation.FilteredList;
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
+import javafx.scene.text.Text;
+import javafx.scene.text.TextFlow;
 import javafx.stage.DirectoryChooser;
 
 import java.nio.file.Files;
@@ -87,7 +89,8 @@ public class MainController {
 
     @FXML private ProgressBar progressBar;
     @FXML private Label statusLabel;
-    @FXML private TextArea logArea;
+    @FXML private ScrollPane logScroll;
+    @FXML private TextFlow logTextFlow;
     @FXML private Button clearLogButton;
 
     private final MetadataService metadataService = new MetadataService();
@@ -428,9 +431,7 @@ public class MainController {
 
     @FXML
     private void onClearLog() {
-        if (logArea != null) {
-            logArea.clear();
-        }
+        clearLog();
     }
 
     @FXML
@@ -601,6 +602,8 @@ public class MainController {
 
         operationInProgress = true;
         disableWhileBusy(true);
+        clearLogNow();
+        appendLog("[EXPORT] Folder: " + exportRoot);
 
         Task<Path> task = new Task<>() {
             @Override
@@ -612,24 +615,42 @@ public class MainController {
                 Files.createDirectories(dataDir);
 
                 if (obj.getType() == DbObjectType.TABLE) {
-                    TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
-                    Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
-                    updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
-                    exportService.exportSql(tableInfo, ddlTarget);
-
-                    if (includeDml) {
-                        Path dataTarget = dataDir.resolve(obj.fileBaseName() + ".sql");
-                        updateMessage("Exporting DATA to " + dataTarget.getFileName() + "...");
-                        exportService.exportDataSql(connection, obj.getName(), dataTarget, dataMaxRows);
+                    boolean ddlOk = false;
+                    try {
+                        TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
+                        Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
+                        updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
+                        exportService.exportSql(tableInfo, ddlTarget);
+                        appendLog("[EXPORT][OK] TABLE DDL " + obj.getDisplayLabel());
+                        ddlOk = true;
+                    } catch (Exception ex) {
+                        appendLog("[EXPORT][FAIL] TABLE DDL " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
+                    }
+                    if (includeDml && ddlOk) {
+                        try {
+                            Path dataTarget = dataDir.resolve(obj.fileBaseName() + ".sql");
+                            updateMessage("Exporting DATA to " + dataTarget.getFileName() + "...");
+                            exportService.exportDataSql(connection, obj.getName(), dataTarget, dataMaxRows);
+                            appendLog("[EXPORT][OK] TABLE DATA " + obj.getDisplayLabel());
+                        } catch (Exception ex) {
+                            appendLog("[EXPORT][FAIL] TABLE DATA " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
+                        }
                     }
                 } else {
-                    String ddl = metadataService.loadObjectDdl(connection, connectedSchema, obj);
-                    if (ddl == null || ddl.isBlank()) {
-                        throw new IllegalStateException("Could not load DDL for " + obj.getType() + " " + obj.getName());
+                    try {
+                        String ddl = metadataService.loadObjectDdl(connection, connectedSchema, obj);
+                        if (ddl == null || ddl.isBlank()) {
+                            appendLog("[EXPORT][FAIL] " + obj.getType() + " " + obj.getDisplayLabel()
+                                    + " :: Could not load DDL (empty)");
+                        } else {
+                            Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
+                            updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
+                            exportService.exportRawSql(ddl, ddlTarget);
+                            appendLog("[EXPORT][OK] " + obj.getType() + " " + obj.getDisplayLabel());
+                        }
+                    } catch (Exception ex) {
+                        appendLog("[EXPORT][FAIL] " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
                     }
-                    Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
-                    updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
-                    exportService.exportRawSql(ddl, ddlTarget);
                 }
 
                 return exportRoot;
@@ -639,13 +660,13 @@ public class MainController {
         bindTask(task);
 
         task.setOnSucceeded(e -> {
-            setStatus("Exported to folder: " + task.getValue());
+            setStatus("Export finished. Folder: " + task.getValue());
             operationInProgress = false;
             disableWhileBusy(false);
         });
         task.setOnFailed(e -> {
             Throwable ex = task.getException();
-            showError("Export failed", ex == null ? "Unknown error" : ex.getMessage());
+            appendLog("[EXPORT][FAIL] " + exportErrorMessage(ex));
             setStatus("Export failed.");
             operationInProgress = false;
             disableWhileBusy(false);
@@ -684,6 +705,10 @@ public class MainController {
         operationInProgress = true;
         disableWhileBusy(true);
 
+        clearLogNow();
+        appendLog("[EXPORT ALL] Folder: " + exportRoot);
+        appendLog("[EXPORT ALL] Objects: " + objectsToExport.size());
+
         Task<Path> task = new Task<>() {
             @Override
             protected Path call() throws Exception {
@@ -691,9 +716,13 @@ public class MainController {
                 updateProgress(0, objectsToExport.size());
 
                 int total = objectsToExport.size();
+                int ok = 0;
+                int fail = 0;
                 for (int i = 0; i < total; i++) {
                     DbObject obj = objectsToExport.get(i);
-                    if (obj == null) continue;
+                    if (obj == null) {
+                        continue;
+                    }
 
                     updateProgress(i, total);
                     updateMessage("Exporting " + obj.getType() + " " + obj.getDisplayLabel() + " (" + (i + 1) + "/" + total + ")...");
@@ -704,38 +733,66 @@ public class MainController {
                     Files.createDirectories(ddlDir);
                     Files.createDirectories(dataDir);
 
-                    if (obj.getType() == DbObjectType.TABLE) {
-                        TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
-                        exportService.exportSql(tableInfo, ddlDir.resolve(obj.fileBaseName() + ".sql"));
-
-                        if (includeDml) {
-                            exportService.exportDataSql(connection, obj.getName(), dataDir.resolve(obj.fileBaseName() + ".sql"), dataMaxRows);
+                    try {
+                        if (obj.getType() == DbObjectType.TABLE) {
+                            boolean stepOk = true;
+                            try {
+                                TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
+                                exportService.exportSql(tableInfo, ddlDir.resolve(obj.fileBaseName() + ".sql"));
+                                appendLog("[EXPORT][OK] TABLE DDL " + obj.getDisplayLabel());
+                            } catch (Exception ex) {
+                                stepOk = false;
+                                appendLog("[EXPORT][FAIL] TABLE DDL " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
+                            }
+                            if (includeDml && stepOk) {
+                                try {
+                                    exportService.exportDataSql(connection, obj.getName(), dataDir.resolve(obj.fileBaseName() + ".sql"), dataMaxRows);
+                                    appendLog("[EXPORT][OK] TABLE DATA " + obj.getDisplayLabel());
+                                } catch (Exception ex) {
+                                    stepOk = false;
+                                    appendLog("[EXPORT][FAIL] TABLE DATA " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
+                                }
+                            }
+                            if (stepOk) {
+                                ok++;
+                            } else {
+                                fail++;
+                            }
+                        } else {
+                            String ddl = metadataService.loadObjectDdl(connection, connectedSchema, obj);
+                            if (ddl == null || ddl.isBlank()) {
+                                appendLog("[EXPORT][FAIL] " + obj.getType() + " " + obj.getDisplayLabel()
+                                        + " :: Could not load DDL (empty)");
+                                fail++;
+                                continue;
+                            }
+                            Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
+                            exportService.exportRawSql(ddl, ddlTarget);
+                            appendLog("[EXPORT][OK] " + obj.getType() + " " + obj.getDisplayLabel());
+                            ok++;
                         }
-                    } else {
-                        String ddl = metadataService.loadObjectDdl(connection, connectedSchema, obj);
-                        if (ddl == null || ddl.isBlank()) {
-                            throw new IllegalStateException("Could not load DDL for " + obj.getType() + " " + obj.getDisplayLabel());
-                        }
-                        Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
-                        exportService.exportRawSql(ddl, ddlTarget);
+                    } catch (Exception ex) {
+                        fail++;
+                        appendLog("[EXPORT][FAIL] " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
                     }
                 }
 
                 updateProgress(total, total);
                 updateMessage("Done.");
+                appendLog("[EXPORT ALL] Finished. OK: " + ok + ", failed/skipped: " + fail);
                 return exportRoot;
             }
         };
 
         bindTask(task);
         task.setOnSucceeded(e -> {
-            setStatus("Exported to folder: " + task.getValue());
+            setStatus("Export finished. Folder: " + task.getValue());
             operationInProgress = false;
             disableWhileBusy(false);
         });
         task.setOnFailed(e -> {
             Throwable ex = task.getException();
-            showError("Export failed", ex == null ? "Unknown error" : ex.getMessage());
+            appendLog("[EXPORT ALL][FAIL] " + exportErrorMessage(ex));
             setStatus("Export failed.");
             operationInProgress = false;
             disableWhileBusy(false);
@@ -794,13 +851,14 @@ public class MainController {
 
         bindTask(task);
         task.setOnSucceeded(e -> {
+            appendLog("[IMPORT] Finished.");
             setStatus("Imported from folder: " + task.getValue());
             operationInProgress = false;
             disableWhileBusy(false);
         });
         task.setOnFailed(e -> {
             Throwable ex = task.getException();
-            showError("Import failed", ex == null ? "Unknown error" : ex.getMessage());
+            appendLog("[IMPORT][FAIL] " + (ex == null ? "Unknown error" : exportErrorMessage(ex)));
             setStatus("Import failed.");
             operationInProgress = false;
             disableWhileBusy(false);
@@ -1079,18 +1137,61 @@ public class MainController {
     }
 
     private void appendLog(String line) {
-        if (line == null) return;
+        if (line == null) {
+            return;
+        }
         Platform.runLater(() -> {
-            if (logArea == null) return;
+            if (logTextFlow == null) {
+                return;
+            }
             String l = line.endsWith("\n") ? line : (line + "\n");
-            logArea.appendText(l);
+            Text t = new Text(l);
+            t.getStyleClass().add("log-line");
+            if (l.contains("[FAIL]")) {
+                t.getStyleClass().add("log-line-fail");
+            } else if (l.contains("[OK]")) {
+                t.getStyleClass().add("log-line-ok");
+            } else {
+                t.getStyleClass().add("log-line-neutral");
+            }
+            logTextFlow.getChildren().add(t);
+            scrollLogToBottom();
         });
+    }
+
+    private void scrollLogToBottom() {
+        if (logScroll == null) {
+            return;
+        }
+        logScroll.applyCss();
+        logScroll.layout();
+        logScroll.setVvalue(1.0);
     }
 
     private void clearLog() {
         Platform.runLater(() -> {
-            if (logArea != null) logArea.clear();
+            if (logTextFlow != null) {
+                logTextFlow.getChildren().clear();
+            }
         });
+    }
+
+    /** Clears log immediately when already on the JavaFX application thread. */
+    private void clearLogNow() {
+        if (logTextFlow != null) {
+            logTextFlow.getChildren().clear();
+        }
+    }
+
+    private static String exportErrorMessage(Throwable ex) {
+        if (ex == null) {
+            return "Unknown error";
+        }
+        String m = ex.getMessage();
+        if (m == null || m.isBlank()) {
+            return ex.getClass().getSimpleName();
+        }
+        return m;
     }
 
     private void showError(String title, String message) {

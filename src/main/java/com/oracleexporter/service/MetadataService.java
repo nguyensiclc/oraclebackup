@@ -93,6 +93,8 @@ public class MetadataService {
 
     public List<DbObject> listObjects(Connection connection) throws SQLException {
         List<DbObject> objects = new ArrayList<>();
+        /** Index names that implement PRIMARY KEY constraints — skip as separate INDEX exports (already in CREATE TABLE). */
+        Set<String> pkBackingIndexes = loadPrimaryKeyBackingIndexNames(connection);
 
         String sql = """
                 SELECT object_type, object_name, subobject_name
@@ -116,11 +118,44 @@ public class MetadataService {
                         continue;
                     }
                 }
+                if ((t == DbObjectType.INDEX || t == DbObjectType.INDEX_PARTITION)
+                        && pkBackingIndexes.contains(on.trim().toUpperCase(Locale.ROOT))) {
+                    continue;
+                }
                 objects.add(new DbObject(t, on, sub));
             }
         }
 
         return objects;
+    }
+
+    /**
+     * Names of indexes that enforce PRIMARY KEY constraints. Exporting them again produces CREATE INDEX DDL
+     * that collides with the unique index created by {@code CREATE TABLE ... PRIMARY KEY} on import (ORA-00955).
+     */
+    private static Set<String> loadPrimaryKeyBackingIndexNames(Connection connection) throws SQLException {
+        Set<String> names = new HashSet<>();
+        String sql = """
+                SELECT DISTINCT i.index_name
+                FROM user_indexes i
+                INNER JOIN user_constraints uc
+                        ON uc.table_name = i.table_name
+                       AND uc.constraint_type = 'P'
+                       AND (
+                            (uc.index_name IS NOT NULL AND uc.index_name = i.index_name)
+                         OR (uc.index_name IS NULL AND uc.constraint_name = i.index_name)
+                       )
+                """;
+        try (PreparedStatement ps = connection.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                String n = rs.getString(1);
+                if (n != null && !n.isBlank()) {
+                    names.add(n.trim().toUpperCase(Locale.ROOT));
+                }
+            }
+        }
+        return names;
     }
 
     public List<String> listTables(Connection connection) throws SQLException {

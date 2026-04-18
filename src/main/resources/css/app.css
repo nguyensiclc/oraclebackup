@@ -182,14 +182,38 @@
     -fx-font-size: 12px;
 }
 
-.log-text {
-    -fx-control-inner-background: #0f1629;
+/* Rich log: ScrollPane + TextFlow (OK = green, FAIL = bold red) */
+.log-scroll {
+    -fx-background-color: #0f1629;
+    -fx-background: #0f1629;
+    -fx-border-color: rgba(255, 255, 255, 0.1);
+    -fx-border-radius: 10;
+    -fx-background-radius: 10;
+    -fx-padding: 0;
+}
+
+.log-scroll > .viewport {
+    -fx-background-color: #0f1629;
+}
+
+.log-textflow {
     -fx-font-family: Consolas, "Segoe UI Mono", monospace;
     -fx-font-size: 12px;
-    -fx-text-fill: #cbd5e1;
-    -fx-background-radius: 10;
-    -fx-border-radius: 10;
-    -fx-border-color: rgba(255, 255, 255, 0.1);
+    -fx-line-spacing: 2;
+    -fx-padding: 8 10 10 10;
+}
+
+.log-textflow .log-line-ok {
+    -fx-fill: #22c55e;
+}
+
+.log-textflow .log-line-fail {
+    -fx-fill: #f87171;
+    -fx-font-weight: bold;
+}
+
+.log-textflow .log-line-neutral {
+    -fx-fill: #cbd5e1;
 }
 
 .status-inline {

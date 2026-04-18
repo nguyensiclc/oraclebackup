@@ -12,6 +12,8 @@ import java.io.IOException;
 
 import java.nio.file.Files;
 
+import java.util.Objects;
+
 import java.nio.file.Path;
 
 import java.sql.Connection;
@@ -100,29 +102,41 @@ public class ImportService {
 
         for (DbObjectType t : DDL_IMPORT_ORDER) {
 
-            if (t == DbObjectType.TABLE) {
+            try {
 
-                log.accept("[DDL] Importing TABLE DDL...");
+                if (t == DbObjectType.TABLE) {
 
-                runAllSqlInDir(connection, exportRoot.resolve(typeFolder(t)).resolve("ddl"), log, false);
+                    log.accept("[DDL] Importing TABLE DDL...");
+
+                    runAllSqlInDir(connection, exportRoot.resolve(typeFolder(t)).resolve("ddl"), log, false);
 
 
 
-                Path tableData = exportRoot.resolve(typeFolder(DbObjectType.TABLE)).resolve("data");
+                    Path tableData = exportRoot.resolve(typeFolder(DbObjectType.TABLE)).resolve("data");
 
-                if (Files.isDirectory(tableData)) {
+                    if (Files.isDirectory(tableData)) {
 
-                    log.accept("[DATA] Importing TABLE data...");
+                        log.accept("[DATA] Importing TABLE data...");
 
-                    runAllSqlInDir(connection, tableData, log, true);
+                        runAllSqlInDir(connection, tableData, log, true);
+
+                    }
+
+                } else {
+
+                    log.accept("[DDL] Importing " + t.name() + " DDL...");
+
+                    runAllSqlInDir(connection, exportRoot.resolve(typeFolder(t)).resolve("ddl"), log, false);
 
                 }
 
-            } else {
+            } catch (IOException ex) {
 
-                log.accept("[DDL] Importing " + t.name() + " DDL...");
+                log.accept("[IMPORT][FAIL] " + t.name() + " :: " + safeIoError(ex));
 
-                runAllSqlInDir(connection, exportRoot.resolve(typeFolder(t)).resolve("ddl"), log, false);
+            } catch (SQLException ex) {
+
+                log.accept("[IMPORT][FAIL] " + t.name() + " :: " + safeSqlError(ex));
 
             }
 
@@ -182,6 +196,16 @@ public class ImportService {
 
                         log.accept("[DATA][FAIL] " + objName + " :: " + safeSqlError(ex));
 
+                    } catch (IOException ex) {
+
+                        try {
+
+                            connection.rollback(sp);
+
+                        } catch (Exception ignored) {}
+
+                        log.accept("[DATA][FAIL] " + objName + " :: " + safeIoError(ex));
+
                     } finally {
 
                         try {
@@ -205,6 +229,10 @@ public class ImportService {
                     } catch (SQLException ex) {
 
                         log.accept("[DDL][FAIL] " + objName + " :: " + safeSqlError(ex));
+
+                    } catch (IOException ex) {
+
+                        log.accept("[DDL][FAIL] " + objName + " :: " + safeIoError(ex));
 
                     }
 
@@ -237,6 +265,12 @@ public class ImportService {
         }
 
         return base + " (ErrorCode=" + err + ")";
+
+    }
+
+    private static String safeIoError(IOException ex) {
+
+        return Objects.toString(ex.getMessage(), ex.getClass().getSimpleName());
 
     }
 

@@ -3,6 +3,7 @@
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.*?>
 <?import javafx.scene.layout.*?>
+<?import javafx.scene.text.TextFlow?>
 
 <BorderPane xmlns="http://javafx.com/javafx/21" xmlns:fx="http://javafx.com/fxml/1"
             fx:controller="com.oracleexporter.gui.MainController"
@@ -147,7 +148,10 @@
                 <ProgressBar fx:id="progressBar" prefWidth="200"/>
                 <Label fx:id="statusLabel" text="Ready." styleClass="status-inline"/>
             </HBox>
-            <TextArea fx:id="logArea" wrapText="false" editable="false" prefRowCount="4" styleClass="log-text"/>
+            <ScrollPane fx:id="logScroll" fitToWidth="true" hbarPolicy="AS_NEEDED" vbarPolicy="AS_NEEDED"
+                        minHeight="100" prefHeight="140" maxHeight="240" styleClass="log-scroll">
+                <TextFlow fx:id="logTextFlow" styleClass="log-textflow"/>
+            </ScrollPane>
         </VBox>
     </bottom>
 
