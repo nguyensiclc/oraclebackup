@@ -152,7 +152,18 @@ public class ExportService {
         if (dt == null) return "";
         String u = dt.toUpperCase(Locale.ROOT);
 
-        // Common Oracle types formatting
+        // VARCHAR2/CHAR: must spell CHAR vs BYTE or import DB may use NLS_LENGTH_SEMANTICS=BYTE and
+        // VARCHAR2(100) becomes 100 bytes — too small for 100 Kanji (ORA-12899).
+        if ("VARCHAR2".equals(u) || "CHAR".equals(u)) {
+            Integer len = c.getLength();
+            if (len != null && len > 0) {
+                String sem = c.isCharLengthSemantics() ? " CHAR" : " BYTE";
+                return u + "(" + len + sem + ")";
+            }
+            return u;
+        }
+
+        // NVARCHAR2, NCHAR: length is always in national-character units
         if (u.contains("CHAR")) {
             Integer len = c.getLength();
             if (len != null && len > 0) return u + "(" + len + ")";

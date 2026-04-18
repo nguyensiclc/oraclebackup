@@ -8,6 +8,12 @@ public class ColumnInfo {
     private final Integer scale;
     private final boolean nullable;
     private final boolean primaryKey;
+    /**
+     * When {@code true}, Oracle {@code VARCHAR2}/{@code CHAR} length was defined in <b>characters</b>
+     * ({@code CHAR_USED = 'C'}). Export must emit {@code VARCHAR2(n CHAR)} so import DBs defaulting to BYTE
+     * semantics do not shrink capacity for Japanese / multi-byte text.
+     */
+    private final boolean charLengthSemantics;
     private final String comment;
 
     public ColumnInfo(
@@ -18,6 +24,7 @@ public class ColumnInfo {
             Integer scale,
             boolean nullable,
             boolean primaryKey,
+            boolean charLengthSemantics,
             String comment
     ) {
         this.name = name;
@@ -27,6 +34,7 @@ public class ColumnInfo {
         this.scale = scale;
         this.nullable = nullable;
         this.primaryKey = primaryKey;
+        this.charLengthSemantics = charLengthSemantics;
         this.comment = comment;
     }
 
@@ -56,6 +64,11 @@ public class ColumnInfo {
 
     public boolean isPrimaryKey() {
         return primaryKey;
+    }
+
+    /** {@code true} if source column used character-length semantics ({@code CHAR} in Oracle DDL). */
+    public boolean isCharLengthSemantics() {
+        return charLengthSemantics;
     }
 
     public String getComment() {

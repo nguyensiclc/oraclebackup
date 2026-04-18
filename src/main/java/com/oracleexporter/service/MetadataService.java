@@ -248,6 +248,7 @@ public class MetadataService {
                     boolean isPk = colName != null && pkCols.contains(colName.toUpperCase(Locale.ROOT));
 
                     Integer len = resolveDeclaredLength(dataType, dataLen, charLen, charUsed);
+                    boolean charSemantics = isOracleVarcharCharSemantics(dataType, charUsed);
                     tableInfo.addColumn(new ColumnInfo(
                             colName,
                             dataType,
@@ -256,6 +257,7 @@ public class MetadataService {
                             scale,
                             nullable,
                             isPk,
+                            charSemantics,
                             comment
                     ));
                 }
@@ -303,6 +305,16 @@ public class MetadataService {
         }
         // BYTE semantics or unknown -> keep DATA_LENGTH
         return dataLen;
+    }
+
+    /** {@code CHAR_USED = 'C'} for {@code VARCHAR2}/{@code CHAR} — DDL must include {@code CHAR} keyword. */
+    private static boolean isOracleVarcharCharSemantics(String dataType, String charUsed) {
+        if (dataType == null || charUsed == null) return false;
+        String u = dataType.trim().toUpperCase(Locale.ROOT);
+        if (!"VARCHAR2".equals(u) && !"CHAR".equals(u)) {
+            return false;
+        }
+        return charUsed.trim().equalsIgnoreCase("C");
     }
 
     private static DbObjectType parseOracleObjectType(String raw) {
