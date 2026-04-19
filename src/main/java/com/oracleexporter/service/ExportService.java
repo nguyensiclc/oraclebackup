@@ -21,6 +21,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.function.BooleanSupplier;
@@ -30,7 +31,9 @@ import java.util.concurrent.CancellationException;
 public class ExportService {
 
     private static final Charset UTF8 = StandardCharsets.UTF_8;
+    /** Matches Oracle mask {@code YYYY-MM-DD HH24:MI:SS} for {@code TO_DATE(..., '...')}. */
     private static final DateTimeFormatter DATE_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final String ORACLE_DATE_TIME_MASK = "YYYY-MM-DD HH24:MI:SS";
 
     public Path exportSql(TableInfo table, Path file) throws IOException {
         String ddl = toCreateTableSql(table);
@@ -234,22 +237,22 @@ public class ExportService {
             return b ? "1" : "0";
         }
 
-        // Date/time
+        // Date/time: TO_DATE with YYYY-MM-DD HH24:MI:SS for DATE and TIMESTAMP columns
         if (jdbcType == Types.DATE && value instanceof java.sql.Date d) {
             LocalDateTime ldt = d.toLocalDate().atStartOfDay();
-            return "TO_DATE('" + DATE_TIME_FMT.format(ldt) + "', 'YYYY-MM-DD HH24:MI:SS')";
+            return toDateLiteral(ldt);
         }
         if ((jdbcType == Types.TIMESTAMP || jdbcType == Types.TIMESTAMP_WITH_TIMEZONE) && value instanceof Timestamp ts) {
-            LocalDateTime ldt = ts.toLocalDateTime();
-            return "TO_TIMESTAMP('" + DATE_TIME_FMT.format(ldt) + "', 'YYYY-MM-DD HH24:MI:SS')";
+            return toDateLiteral(ts.toLocalDateTime());
         }
         if (value instanceof OffsetDateTime odt) {
-            LocalDateTime ldt = odt.toLocalDateTime();
-            return "TO_TIMESTAMP('" + DATE_TIME_FMT.format(ldt) + "', 'YYYY-MM-DD HH24:MI:SS')";
+            return toDateLiteral(odt.toLocalDateTime());
         }
         if (value instanceof ZonedDateTime zdt) {
-            LocalDateTime ldt = zdt.toLocalDateTime();
-            return "TO_TIMESTAMP('" + DATE_TIME_FMT.format(ldt) + "', 'YYYY-MM-DD HH24:MI:SS')";
+            return toDateLiteral(zdt.toLocalDateTime());
+        }
+        if (value instanceof LocalDateTime ldt) {
+            return toDateLiteral(ldt);
         }
 
         // RAW/BLOB -> hextoraw
@@ -267,6 +270,11 @@ public class ExportService {
 
         // Default treat as string (VARCHAR2, CHAR, etc.)
         return "'" + escapeSqlString(rs.getString(index)) + "'";
+    }
+
+    private static String toDateLiteral(LocalDateTime ldt) {
+        LocalDateTime t = ldt.truncatedTo(ChronoUnit.SECONDS);
+        return "TO_DATE('" + DATE_TIME_FMT.format(t) + "', '" + ORACLE_DATE_TIME_MASK + "')";
     }
 
     private static String toHex(byte[] bytes) {
