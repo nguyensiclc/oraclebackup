@@ -110,11 +110,13 @@
                         <Button fx:id="exportButton" text="Export selected" onAction="#onExport" styleClass="btn-toolbar-primary"/>
                         <Button fx:id="exportAllButton" text="Export ALL" onAction="#onExportAll" styleClass="btn-toolbar"/>
                         <Button fx:id="importButton" text="Import" onAction="#onImport" styleClass="btn-toolbar-accent"/>
+                        <Button fx:id="stopButton" text="Stop" onAction="#onStop" disable="true" styleClass="btn-toolbar"/>
                     </HBox>
                     <HBox spacing="12" alignment="CENTER_LEFT">
                         <Label text="Max data rows per table" styleClass="field-label-inline"/>
                         <Spinner fx:id="maxDataRowsSpinner" prefWidth="100" editable="true"/>
                         <CheckBox fx:id="exportAllDataCheck" text="Export all rows"/>
+                        <CheckBox fx:id="importDataOnlyCheck" text="Data only: skip table DDL (existing tables)"/>
                         <Region HBox.hgrow="ALWAYS"/>
                     </HBox>
                     <TableView fx:id="columnTable" VBox.vgrow="ALWAYS" minHeight="120">

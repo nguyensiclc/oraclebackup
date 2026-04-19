@@ -38,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.concurrent.CancellationException;
 
 public class MainController {
 
@@ -50,6 +51,7 @@ public class MainController {
     private static final String CFG_IMPORT_DIR = "import.baseDir";
     private static final String CFG_DATA_MAX_ROWS = "export.data.maxRows";
     private static final String CFG_DATA_ALL_ROWS = "export.data.allRows";
+    private static final String CFG_IMPORT_DATA_ONLY = "import.dataOnly";
 
     private static final DateTimeFormatter EXPORT_TS_FMT = DateTimeFormatter.ofPattern("dd_MM_yyyy_HH_mm");
 
@@ -82,10 +84,12 @@ public class MainController {
     @FXML private CheckBox includeDmlCheck;
     @FXML private Spinner<Integer> maxDataRowsSpinner;
     @FXML private CheckBox exportAllDataCheck;
+    @FXML private CheckBox importDataOnlyCheck;
     @FXML private Button loadPreviewButton;
     @FXML private Button exportButton;
     @FXML private Button exportAllButton;
     @FXML private Button importButton;
+    @FXML private Button stopButton;
 
     @FXML private ProgressBar progressBar;
     @FXML private Label statusLabel;
@@ -104,6 +108,8 @@ public class MainController {
     private Path exportBaseDir;
     private Path importDir;
     private boolean operationInProgress;
+    /** Set while export, export-all, or import runs; may be {@link Task#cancel() cancelled. */
+    private Task<?> activeCancellableTask;
     private final ObservableList<DbObject> allObjects = FXCollections.observableArrayList();
     private FilteredList<DbObject> filteredObjects;
 
@@ -135,6 +141,9 @@ public class MainController {
             refreshDataExportControlsState();
             saveFieldsToConfig();
         });
+        if (importDataOnlyCheck != null) {
+            importDataOnlyCheck.selectedProperty().addListener((obs, o, n) -> saveFieldsToConfig());
+        }
         maxDataRowsSpinner.valueProperty().addListener((obs, o, n) -> saveFieldsToConfig());
 
         exportButton.setDisable(true);
@@ -217,6 +226,9 @@ public class MainController {
         }
         if (importButton != null) {
             importButton.setGraphic(textGraphic("⬆"));
+        }
+        if (stopButton != null) {
+            stopButton.setGraphic(textGraphic("⏹"));
         }
     }
 
@@ -358,6 +370,7 @@ public class MainController {
         p.setProperty(CFG_IMPORT_DIR, "");
         p.setProperty(CFG_DATA_MAX_ROWS, "100");
         p.setProperty(CFG_DATA_ALL_ROWS, "false");
+        p.setProperty(CFG_IMPORT_DATA_ONLY, "false");
         return p;
     }
 
@@ -432,6 +445,16 @@ public class MainController {
     @FXML
     private void onClearLog() {
         clearLog();
+    }
+
+    @FXML
+    private void onStop() {
+        Task<?> t = activeCancellableTask;
+        if (t == null || t.isDone()) {
+            return;
+        }
+        appendLog("[STOP] Stopping (partial work is kept)…");
+        t.cancel();
     }
 
     @FXML
@@ -590,18 +613,18 @@ public class MainController {
             connectedSchema = safeSchemaName(resolveCurrentSchema(connection));
         }
 
+        operationInProgress = true;
         boolean includeDml = includeDmlCheck.isSelected();
         final Integer dataMaxRows = (includeDml && obj.getType() == DbObjectType.TABLE) ? resolveDataExportMaxRows() : null;
+        final DbObject exportObj = obj;
 
         LocalDateTime now = LocalDateTime.now();
         String exportFolderName = connectedSchema + "_" + EXPORT_TS_FMT.format(now);
         Path exportRoot = exportBaseDir.resolve(exportFolderName);
-        Path typeRoot = exportRoot.resolve(ImportService.typeFolder(obj.getType()));
+        Path typeRoot = exportRoot.resolve(ImportService.typeFolder(exportObj.getType()));
         Path ddlDir = typeRoot.resolve("ddl");
         Path dataDir = typeRoot.resolve("data");
 
-        operationInProgress = true;
-        disableWhileBusy(true);
         clearLogNow();
         appendLog("[EXPORT] Folder: " + exportRoot);
 
@@ -613,65 +636,94 @@ public class MainController {
 
                 Files.createDirectories(ddlDir);
                 Files.createDirectories(dataDir);
+                if (isCancelled()) {
+                    return exportRoot;
+                }
 
-                if (obj.getType() == DbObjectType.TABLE) {
+                if (exportObj.getType() == DbObjectType.TABLE) {
                     boolean ddlOk = false;
-                    try {
-                        TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
-                        Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
-                        updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
-                        exportService.exportSql(tableInfo, ddlTarget);
-                        appendLog("[EXPORT][OK] TABLE DDL " + obj.getDisplayLabel());
-                        ddlOk = true;
-                    } catch (Exception ex) {
-                        appendLog("[EXPORT][FAIL] TABLE DDL " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
-                    }
-                    if (includeDml && ddlOk) {
+                    if (!isCancelled()) {
                         try {
-                            Path dataTarget = dataDir.resolve(obj.fileBaseName() + ".sql");
-                            updateMessage("Exporting DATA to " + dataTarget.getFileName() + "...");
-                            exportService.exportDataSql(connection, obj.getName(), dataTarget, dataMaxRows);
-                            appendLog("[EXPORT][OK] TABLE DATA " + obj.getDisplayLabel());
+                            TableInfo tableInfo = metadataService.loadTableInfo(connection, exportObj.getName());
+                            if (isCancelled()) {
+                                return exportRoot;
+                            }
+                            Path ddlTarget = ddlDir.resolve(exportObj.fileBaseName() + ".sql");
+                            updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
+                            exportService.exportSql(tableInfo, ddlTarget);
+                            appendLog("[EXPORT][OK] TABLE DDL " + exportObj.getDisplayLabel());
+                            ddlOk = true;
                         } catch (Exception ex) {
-                            appendLog("[EXPORT][FAIL] TABLE DATA " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
+                            appendLog("[EXPORT][FAIL] TABLE DDL " + exportObj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
+                        }
+                    }
+                    if (includeDml && ddlOk && !isCancelled()) {
+                        try {
+                            Path dataTarget = dataDir.resolve(exportObj.fileBaseName() + ".sql");
+                            updateMessage("Exporting DATA to " + dataTarget.getFileName() + "...");
+                            exportService.exportDataSql(
+                                    connection, exportObj.getName(), dataTarget, dataMaxRows, this::isCancelled);
+                            if (!isCancelled()) {
+                                appendLog("[EXPORT][OK] TABLE DATA " + exportObj.getDisplayLabel());
+                            } else {
+                                appendLog("[EXPORT][STOP] TABLE DATA " + exportObj.getDisplayLabel() + " (file may be partial)");
+                            }
+                        } catch (CancellationException ex) {
+                            appendLog("[EXPORT][STOP] TABLE DATA " + exportObj.getDisplayLabel() + " (file may be partial)");
+                        } catch (Exception ex) {
+                            appendLog("[EXPORT][FAIL] TABLE DATA " + exportObj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
                         }
                     }
                 } else {
+                    if (isCancelled()) {
+                        return exportRoot;
+                    }
                     try {
-                        String ddl = metadataService.loadObjectDdl(connection, connectedSchema, obj);
+                        String ddl = metadataService.loadObjectDdl(connection, connectedSchema, exportObj);
+                        if (isCancelled()) {
+                            return exportRoot;
+                        }
                         if (ddl == null || ddl.isBlank()) {
-                            appendLog("[EXPORT][FAIL] " + obj.getType() + " " + obj.getDisplayLabel()
+                            appendLog("[EXPORT][FAIL] " + exportObj.getType() + " " + exportObj.getDisplayLabel()
                                     + " :: Could not load DDL (empty)");
                         } else {
-                            Path ddlTarget = ddlDir.resolve(obj.fileBaseName() + ".sql");
+                            Path ddlTarget = ddlDir.resolve(exportObj.fileBaseName() + ".sql");
                             updateMessage("Exporting DDL to " + ddlTarget.getFileName() + "...");
                             exportService.exportRawSql(ddl, ddlTarget);
-                            appendLog("[EXPORT][OK] " + obj.getType() + " " + obj.getDisplayLabel());
+                            appendLog("[EXPORT][OK] " + exportObj.getType() + " " + exportObj.getDisplayLabel());
                         }
                     } catch (Exception ex) {
-                        appendLog("[EXPORT][FAIL] " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
+                        appendLog("[EXPORT][FAIL] " + exportObj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
                     }
                 }
 
                 return exportRoot;
             }
         };
-
+        activeCancellableTask = task;
         bindTask(task);
-
         task.setOnSucceeded(e -> {
+            if (task.isCancelled()) {
+                unbindStatusFromTask();
+                onCancellableTaskEnded(task, true, null);
+                return;
+            }
             setStatus("Export finished. Folder: " + task.getValue());
-            operationInProgress = false;
-            disableWhileBusy(false);
+            onCancellableTaskEnded(task, false, null);
         });
         task.setOnFailed(e -> {
             Throwable ex = task.getException();
             appendLog("[EXPORT][FAIL] " + exportErrorMessage(ex));
             setStatus("Export failed.");
-            operationInProgress = false;
-            disableWhileBusy(false);
+            onCancellableTaskEnded(task, false, ex);
         });
-
+        task.setOnCancelled(e -> {
+            unbindStatusFromTask();
+            appendLog("[EXPORT] Stopped. Files written so far are left on disk.");
+            setStatus("Export stopped. Partial result kept in folder: " + exportRoot);
+            onCancellableTaskEnded(task, true, null);
+        });
+        disableWhileBusy(true);
         new Thread(task, "export-task").start();
     }
 
@@ -695,31 +747,34 @@ public class MainController {
             connectedSchema = safeSchemaName(resolveCurrentSchema(connection));
         }
 
+        operationInProgress = true;
         boolean includeDml = includeDmlCheck.isSelected();
         final Integer dataMaxRows = includeDml ? resolveDataExportMaxRows() : null;
+        final List<DbObject> toExport = objectsToExport;
 
         LocalDateTime now = LocalDateTime.now();
         String exportFolderName = connectedSchema + "_" + EXPORT_TS_FMT.format(now);
-        Path exportRoot = exportBaseDir.resolve(exportFolderName);
-
-        operationInProgress = true;
-        disableWhileBusy(true);
+        final Path exportRoot = exportBaseDir.resolve(exportFolderName);
 
         clearLogNow();
         appendLog("[EXPORT ALL] Folder: " + exportRoot);
-        appendLog("[EXPORT ALL] Objects: " + objectsToExport.size());
+        appendLog("[EXPORT ALL] Objects: " + toExport.size());
 
         Task<Path> task = new Task<>() {
             @Override
             protected Path call() throws Exception {
                 updateMessage("Preparing export folders...");
-                updateProgress(0, objectsToExport.size());
+                updateProgress(0, toExport.size());
 
-                int total = objectsToExport.size();
+                int total = toExport.size();
                 int ok = 0;
                 int fail = 0;
                 for (int i = 0; i < total; i++) {
-                    DbObject obj = objectsToExport.get(i);
+                    if (isCancelled()) {
+                        appendLog("[EXPORT ALL] Stopped after " + (i) + " object(s).");
+                        break;
+                    }
+                    DbObject obj = toExport.get(i);
                     if (obj == null) {
                         continue;
                     }
@@ -736,22 +791,38 @@ public class MainController {
                     try {
                         if (obj.getType() == DbObjectType.TABLE) {
                             boolean stepOk = true;
-                            try {
-                                TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
-                                exportService.exportSql(tableInfo, ddlDir.resolve(obj.fileBaseName() + ".sql"));
-                                appendLog("[EXPORT][OK] TABLE DDL " + obj.getDisplayLabel());
-                            } catch (Exception ex) {
-                                stepOk = false;
-                                appendLog("[EXPORT][FAIL] TABLE DDL " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
-                            }
-                            if (includeDml && stepOk) {
+                            if (!isCancelled()) {
                                 try {
-                                    exportService.exportDataSql(connection, obj.getName(), dataDir.resolve(obj.fileBaseName() + ".sql"), dataMaxRows);
+                                    TableInfo tableInfo = metadataService.loadTableInfo(connection, obj.getName());
+                                    if (isCancelled()) {
+                                        break;
+                                    }
+                                    exportService.exportSql(tableInfo, ddlDir.resolve(obj.fileBaseName() + ".sql"));
+                                    appendLog("[EXPORT][OK] TABLE DDL " + obj.getDisplayLabel());
+                                } catch (Exception ex) {
+                                    stepOk = false;
+                                    appendLog("[EXPORT][FAIL] TABLE DDL " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
+                                }
+                            }
+                            if (includeDml && stepOk && !isCancelled()) {
+                                try {
+                                    exportService.exportDataSql(
+                                            connection, obj.getName(), dataDir.resolve(obj.fileBaseName() + ".sql"), dataMaxRows, this::isCancelled);
+                                    if (isCancelled()) {
+                                        appendLog("[EXPORT][STOP] TABLE DATA " + obj.getDisplayLabel() + " (file may be partial)");
+                                        break;
+                                    }
                                     appendLog("[EXPORT][OK] TABLE DATA " + obj.getDisplayLabel());
+                                } catch (CancellationException ex) {
+                                    appendLog("[EXPORT][STOP] TABLE DATA " + obj.getDisplayLabel() + " (file may be partial)");
+                                    break;
                                 } catch (Exception ex) {
                                     stepOk = false;
                                     appendLog("[EXPORT][FAIL] TABLE DATA " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
                                 }
+                            }
+                            if (isCancelled()) {
+                                break;
                             }
                             if (stepOk) {
                                 ok++;
@@ -759,7 +830,13 @@ public class MainController {
                                 fail++;
                             }
                         } else {
+                            if (isCancelled()) {
+                                break;
+                            }
                             String ddl = metadataService.loadObjectDdl(connection, connectedSchema, obj);
+                            if (isCancelled()) {
+                                break;
+                            }
                             if (ddl == null || ddl.isBlank()) {
                                 appendLog("[EXPORT][FAIL] " + obj.getType() + " " + obj.getDisplayLabel()
                                         + " :: Could not load DDL (empty)");
@@ -772,6 +849,9 @@ public class MainController {
                             ok++;
                         }
                     } catch (Exception ex) {
+                        if (ex instanceof CancellationException) {
+                            break;
+                        }
                         fail++;
                         appendLog("[EXPORT][FAIL] " + obj.getDisplayLabel() + " :: " + exportErrorMessage(ex));
                     }
@@ -779,25 +859,37 @@ public class MainController {
 
                 updateProgress(total, total);
                 updateMessage("Done.");
-                appendLog("[EXPORT ALL] Finished. OK: " + ok + ", failed/skipped: " + fail);
+                if (!isCancelled()) {
+                    appendLog("[EXPORT ALL] Finished. OK: " + ok + ", failed/skipped: " + fail);
+                }
                 return exportRoot;
             }
         };
 
+        activeCancellableTask = task;
         bindTask(task);
         task.setOnSucceeded(e -> {
+            if (task.isCancelled()) {
+                unbindStatusFromTask();
+                onCancellableTaskEnded(task, true, null);
+                return;
+            }
             setStatus("Export finished. Folder: " + task.getValue());
-            operationInProgress = false;
-            disableWhileBusy(false);
+            onCancellableTaskEnded(task, false, null);
         });
         task.setOnFailed(e -> {
             Throwable ex = task.getException();
             appendLog("[EXPORT ALL][FAIL] " + exportErrorMessage(ex));
             setStatus("Export failed.");
-            operationInProgress = false;
-            disableWhileBusy(false);
+            onCancellableTaskEnded(task, false, ex);
         });
-
+        task.setOnCancelled(e -> {
+            unbindStatusFromTask();
+            setStatus("Export all stopped. Partial result kept: " + exportRoot);
+            appendLog("[EXPORT ALL] Stopped. Folders and files already written are kept.");
+            onCancellableTaskEnded(task, true, null);
+        });
+        disableWhileBusy(true);
         new Thread(task, "export-all-task").start();
     }
 
@@ -812,58 +904,84 @@ public class MainController {
             showError("Import folder not set", "Please choose an import folder first.");
             return;
         }
-
         operationInProgress = true;
-        disableWhileBusy(true);
+        final boolean dataOnly = importDataOnlyCheck != null && importDataOnlyCheck.isSelected();
+        final Path importPath = importDir;
         clearLog();
-        appendLog("[IMPORT] Root folder: " + importDir);
+        appendLog("[IMPORT] Root folder: " + importPath);
+        if (dataOnly) {
+            appendLog("[IMPORT] Data only: will skip table DDL, run other DDL, then data.");
+        }
 
         Task<Path> task = new Task<>() {
             @Override
             protected Path call() throws Exception {
-                updateMessage("Checking schema is empty...");
+                updateMessage("Preparing import...");
                 updateProgress(-1, 1);
-                metadataService.requireSchemaEmptyForImport(connection);
-
+                if (isCancelled()) {
+                    return importPath;
+                }
+                if (!dataOnly) {
+                    updateMessage("Checking schema is empty...");
+                    metadataService.requireSchemaEmptyForImport(connection);
+                }
+                if (isCancelled()) {
+                    return importPath;
+                }
                 updateMessage("Importing from folder...");
                 boolean prevAutoCommit = true;
                 try {
-                    prevAutoCommit = connection.getAutoCommit();
-                } catch (SQLException ignored) {}
-
-                try {
+                    try {
+                        prevAutoCommit = connection.getAutoCommit();
+                    } catch (SQLException ignored) {
+                    }
                     try {
                         connection.setAutoCommit(false);
-                    } catch (SQLException ignored) {}
-                    importService.importFromExportFolder(connection, importDir, MainController.this::appendLog);
-                    try {
-                        connection.commit();
-                    } catch (SQLException ignored) {}
+                    } catch (SQLException ignored) {
+                    }
+                    importService.importFromExportFolder(
+                            connection, importPath,
+                            new ImportService.ImportOptions(dataOnly, this::isCancelled),
+                            MainController.this::appendLog);
                 } finally {
                     try {
+                        connection.commit();
+                    } catch (SQLException ignored) {
+                    }
+                    try {
                         connection.setAutoCommit(prevAutoCommit);
-                    } catch (SQLException ignored) {}
+                    } catch (SQLException ignored) {
+                    }
                 }
-
-                return importDir;
+                return importPath;
             }
         };
 
+        activeCancellableTask = task;
         bindTask(task);
         task.setOnSucceeded(e -> {
+            if (task.isCancelled()) {
+                unbindStatusFromTask();
+                onCancellableTaskEnded(task, true, null);
+                return;
+            }
             appendLog("[IMPORT] Finished.");
             setStatus("Imported from folder: " + task.getValue());
-            operationInProgress = false;
-            disableWhileBusy(false);
+            onCancellableTaskEnded(task, false, null);
         });
         task.setOnFailed(e -> {
             Throwable ex = task.getException();
             appendLog("[IMPORT][FAIL] " + (ex == null ? "Unknown error" : exportErrorMessage(ex)));
             setStatus("Import failed.");
-            operationInProgress = false;
-            disableWhileBusy(false);
+            onCancellableTaskEnded(task, false, ex);
         });
-
+        task.setOnCancelled(e -> {
+            unbindStatusFromTask();
+            setStatus("Import stopped. Committed work so far is kept.");
+            appendLog("[IMPORT] Stopped. Changes that were already applied are committed (except failed per-file rollbacks).");
+            onCancellableTaskEnded(task, true, null);
+        });
+        disableWhileBusy(true);
         new Thread(task, "import-task").start();
     }
 
@@ -888,6 +1006,29 @@ public class MainController {
         progressBar.progressProperty().bind(task.progressProperty());
     }
 
+    private void unbindStatusFromTask() {
+        if (statusLabel != null) {
+            try {
+                statusLabel.textProperty().unbind();
+            } catch (Exception ignored) {
+            }
+        }
+        if (progressBar != null) {
+            try {
+                progressBar.progressProperty().unbind();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private void onCancellableTaskEnded(Task<?> task, boolean cancelled, Throwable ex) {
+        if (activeCancellableTask == task) {
+            activeCancellableTask = null;
+        }
+        operationInProgress = false;
+        disableWhileBusy(false);
+    }
+
     private void disableWhileBusy(boolean busy) {
         boolean connected = isConnected();
         DbObject obj = getSelectedObject();
@@ -905,6 +1046,10 @@ public class MainController {
         exportButton.setDisable(busy || !connected || !hasSelection || !hasExportDir);
         exportAllButton.setDisable(busy || !connected || allObjects.isEmpty() || !hasExportDir);
         if (importButton != null) importButton.setDisable(busy || !connected || !hasImportDir);
+        if (stopButton != null) {
+            boolean showStop = activeCancellableTask != null;
+            stopButton.setDisable(!showStop);
+        }
         refreshDataExportControlsState();
     }
 
@@ -1000,6 +1145,9 @@ public class MainController {
         exportAllDataCheck.setSelected(Boolean.parseBoolean(config.getProperty(CFG_DATA_ALL_ROWS, "false")));
         int maxRows = parsePositiveInt(config.getProperty(CFG_DATA_MAX_ROWS, "100"), 100);
         maxDataRowsSpinner.getValueFactory().setValue(maxRows);
+        if (importDataOnlyCheck != null) {
+            importDataOnlyCheck.setSelected(Boolean.parseBoolean(config.getProperty(CFG_IMPORT_DATA_ONLY, "false")));
+        }
     }
 
     /**
@@ -1020,6 +1168,9 @@ public class MainController {
         }
         if (importDir != null) {
             config.setProperty(CFG_IMPORT_DIR, importDir.toString());
+        }
+        if (importDataOnlyCheck != null) {
+            config.setProperty(CFG_IMPORT_DATA_ONLY, Boolean.toString(importDataOnlyCheck.isSelected()));
         }
         config.setProperty(CFG_DATA_ALL_ROWS, Boolean.toString(exportAllDataCheck.isSelected()));
         config.setProperty(CFG_DATA_MAX_ROWS, Integer.toString(maxDataRowsSpinner.getValue()));

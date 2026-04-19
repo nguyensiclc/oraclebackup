@@ -10,24 +10,39 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.BooleanSupplier;
+
+import java.util.concurrent.CancellationException;
 
 public final class SqlScriptRunner {
     private SqlScriptRunner() {}
 
     public static void runFile(Connection connection, Path file) throws IOException, SQLException {
+        runFile(connection, file, null);
+    }
+
+    /**
+     * @param cancelled when {@code true} before each statement, throws {@link CancellationException}
+     */
+    public static void runFile(Connection connection, Path file, BooleanSupplier cancelled) throws IOException, SQLException {
         if (connection == null) throw new IllegalArgumentException("connection is null");
         if (file == null) throw new IllegalArgumentException("file is null");
         String sql = Files.readString(file, StandardCharsets.UTF_8);
-        runSql(connection, sql);
+        runSql(connection, sql, cancelled);
     }
 
     public static void runSql(Connection connection, String script) throws SQLException {
+        runSql(connection, script, null);
+    }
+
+    public static void runSql(Connection connection, String script, BooleanSupplier cancelled) throws SQLException {
         if (connection == null) throw new IllegalArgumentException("connection is null");
         if (script == null) throw new IllegalArgumentException("script is null");
 
         List<String> statements = splitStatements(script);
         try (Statement st = connection.createStatement()) {
             for (String s : statements) {
+                throwIfCancelled(cancelled);
                 String trimmed = s.trim();
                 if (trimmed.isEmpty()) continue;
 
@@ -60,24 +75,34 @@ public final class SqlScriptRunner {
      * @param insertBatchSize max inserts per {@link Statement#executeBatch()}; if {@code <= 0}, delegates to {@link #runFile}.
      */
     public static void runFileWithInsertBatch(Connection connection, Path file, int insertBatchSize) throws IOException, SQLException {
+        runFileWithInsertBatch(connection, file, insertBatchSize, null);
+    }
+
+    public static void runFileWithInsertBatch(Connection connection, Path file, int insertBatchSize, BooleanSupplier cancelled)
+            throws IOException, SQLException {
         if (connection == null) throw new IllegalArgumentException("connection is null");
         if (file == null) throw new IllegalArgumentException("file is null");
         if (insertBatchSize <= 0) {
-            runFile(connection, file);
+            runFile(connection, file, cancelled);
             return;
         }
         String sql = Files.readString(file, StandardCharsets.UTF_8);
-        runSqlWithInsertBatch(connection, sql, insertBatchSize);
+        runSqlWithInsertBatch(connection, sql, insertBatchSize, cancelled);
     }
 
     /**
      * Like {@link #runSql} but batches consecutive {@code INSERT} statements.
      */
     public static void runSqlWithInsertBatch(Connection connection, String script, int insertBatchSize) throws SQLException {
+        runSqlWithInsertBatch(connection, script, insertBatchSize, null);
+    }
+
+    public static void runSqlWithInsertBatch(Connection connection, String script, int insertBatchSize, BooleanSupplier cancelled)
+            throws SQLException {
         if (connection == null) throw new IllegalArgumentException("connection is null");
         if (script == null) throw new IllegalArgumentException("script is null");
         if (insertBatchSize <= 0) {
-            runSql(connection, script);
+            runSql(connection, script, cancelled);
             return;
         }
 
@@ -85,6 +110,7 @@ public final class SqlScriptRunner {
         try (Statement st = connection.createStatement()) {
             int pending = 0;
             for (String s : statements) {
+                throwIfCancelled(cancelled);
                 String trimmed = s.trim();
                 if (trimmed.isEmpty()) continue;
 
@@ -289,6 +315,15 @@ public final class SqlScriptRunner {
     private static String tailUpper(StringBuilder sb, int maxChars) {
         int start = Math.max(0, sb.length() - maxChars);
         return sb.substring(start).toUpperCase(Locale.ROOT);
+    }
+
+    private static void throwIfCancelled(BooleanSupplier cancelled) {
+        if (cancelled == null) {
+            return;
+        }
+        if (cancelled.getAsBoolean()) {
+            throw new CancellationException("Operation stopped");
+        }
     }
 }
 

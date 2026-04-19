@@ -23,7 +23,9 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
+import java.util.concurrent.CancellationException;
 
 public class ExportService {
 
@@ -51,8 +53,15 @@ public class ExportService {
 
     /**
      * @param maxRows {@code null} or non-positive = export all rows; otherwise cap at this many rows (Oracle {@code FETCH FIRST}).
+     * @param cancelled if non-null, {@link BooleanSupplier#getAsBoolean()} = true means stop; checked every 500 output rows
      */
     public Path exportDataSql(Connection connection, String tableName, Path file, Integer maxRows) throws IOException, SQLException {
+        return exportDataSql(connection, tableName, file, maxRows, null);
+    }
+
+    public Path exportDataSql(
+            Connection connection, String tableName, Path file, Integer maxRows, BooleanSupplier cancelled)
+            throws IOException, SQLException {
         if (connection == null) throw new IllegalArgumentException("connection is null");
         if (tableName == null || tableName.isBlank()) throw new IllegalArgumentException("tableName is blank");
 
@@ -77,6 +86,9 @@ public class ExportService {
 
             long row = 0;
             while (rs.next()) {
+                if (row % 500 == 0 && cancelled != null && cancelled.getAsBoolean()) {
+                    throw new CancellationException("Operation stopped");
+                }
                 w.write(insertPrefix);
                 for (int i = 1; i <= colCount; i++) {
                     if (i > 1) w.write(", ");
@@ -152,13 +164,11 @@ public class ExportService {
         if (dt == null) return "";
         String u = dt.toUpperCase(Locale.ROOT);
 
-        // VARCHAR2/CHAR: must spell CHAR vs BYTE or import DB may use NLS_LENGTH_SEMANTICS=BYTE and
-        // VARCHAR2(100) becomes 100 bytes — too small for 100 Kanji (ORA-12899).
+        // VARCHAR2/CHAR: always emit CHAR semantics in DDL so length is in characters (not bytes).
         if ("VARCHAR2".equals(u) || "CHAR".equals(u)) {
             Integer len = c.getLength();
             if (len != null && len > 0) {
-                String sem = c.isCharLengthSemantics() ? " CHAR" : " BYTE";
-                return u + "(" + len + sem + ")";
+                return u + "(" + len + " CHAR)";
             }
             return u;
         }
