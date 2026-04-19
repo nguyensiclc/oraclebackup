@@ -20,6 +20,7 @@ import javafx.collections.transformation.FilteredList;
 import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.stage.DirectoryChooser;
@@ -34,10 +35,13 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 
 public class MainController {
@@ -52,6 +56,8 @@ public class MainController {
     private static final String CFG_DATA_MAX_ROWS = "export.data.maxRows";
     private static final String CFG_DATA_ALL_ROWS = "export.data.allRows";
     private static final String CFG_IMPORT_DATA_ONLY = "import.dataOnly";
+    /** Comma-separated {@link DbObjectType} names to import; empty = all types. */
+    private static final String CFG_IMPORT_OBJECT_TYPES = "import.objectTypes";
 
     private static final DateTimeFormatter EXPORT_TS_FMT = DateTimeFormatter.ofPattern("dd_MM_yyyy_HH_mm");
 
@@ -85,6 +91,7 @@ public class MainController {
     @FXML private Spinner<Integer> maxDataRowsSpinner;
     @FXML private CheckBox exportAllDataCheck;
     @FXML private CheckBox importDataOnlyCheck;
+    @FXML private FlowPane importTypesFlowPane;
     @FXML private Button loadPreviewButton;
     @FXML private Button exportButton;
     @FXML private Button exportAllButton;
@@ -119,6 +126,7 @@ public class MainController {
     /** Saved (user → password) pairs; order matches config file index order. */
     private final LinkedHashMap<String, String> savedCredentials = new LinkedHashMap<>();
     private final Properties config = new Properties();
+    private final EnumMap<DbObjectType, CheckBox> importTypeCheckboxes = new EnumMap<>(DbObjectType.class);
 
     @FXML
     public void initialize() {
@@ -200,6 +208,93 @@ public class MainController {
 
         refreshDataExportControlsState();
         decorateToolbarButtons();
+        buildImportTypeCheckboxes();
+        applyImportObjectTypesFromConfig();
+    }
+
+    private void buildImportTypeCheckboxes() {
+        if (importTypesFlowPane == null) {
+            return;
+        }
+        importTypesFlowPane.getChildren().clear();
+        importTypeCheckboxes.clear();
+        for (DbObjectType t : DbObjectType.values()) {
+            CheckBox cb = new CheckBox(t.name());
+            cb.setSelected(true);
+            cb.selectedProperty().addListener((obs, o, n) -> saveFieldsToConfig());
+            importTypeCheckboxes.put(t, cb);
+            importTypesFlowPane.getChildren().add(cb);
+        }
+    }
+
+    private void applyImportObjectTypesFromConfig() {
+        if (importTypeCheckboxes.isEmpty()) {
+            return;
+        }
+        String raw = config.getProperty(CFG_IMPORT_OBJECT_TYPES, "").trim();
+        if (raw.isEmpty()) {
+            importTypeCheckboxes.values().forEach(cb -> cb.setSelected(true));
+            return;
+        }
+        Set<DbObjectType> want = EnumSet.noneOf(DbObjectType.class);
+        for (String part : raw.split(",")) {
+            String p = part.trim();
+            if (p.isEmpty()) {
+                continue;
+            }
+            try {
+                want.add(DbObjectType.valueOf(p));
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (want.isEmpty()) {
+            importTypeCheckboxes.values().forEach(cb -> cb.setSelected(true));
+            return;
+        }
+        for (DbObjectType t : DbObjectType.values()) {
+            importTypeCheckboxes.get(t).setSelected(want.contains(t));
+        }
+    }
+
+    private EnumSet<DbObjectType> collectImportObjectTypesForImport() {
+        if (importTypeCheckboxes.isEmpty()) {
+            return EnumSet.allOf(DbObjectType.class);
+        }
+        EnumSet<DbObjectType> set = EnumSet.noneOf(DbObjectType.class);
+        for (var e : importTypeCheckboxes.entrySet()) {
+            if (e.getValue().isSelected()) {
+                set.add(e.getKey());
+            }
+        }
+        return set;
+    }
+
+    private void saveImportObjectTypesToConfig() {
+        if (importTypeCheckboxes.isEmpty()) {
+            return;
+        }
+        boolean all = true;
+        for (CheckBox cb : importTypeCheckboxes.values()) {
+            if (!cb.isSelected()) {
+                all = false;
+                break;
+            }
+        }
+        if (all) {
+            config.setProperty(CFG_IMPORT_OBJECT_TYPES, "");
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (DbObjectType t : DbObjectType.values()) {
+            CheckBox cb = importTypeCheckboxes.get(t);
+            if (cb != null && cb.isSelected()) {
+                if (sb.length() > 0) {
+                    sb.append(',');
+                }
+                sb.append(t.name());
+            }
+        }
+        config.setProperty(CFG_IMPORT_OBJECT_TYPES, sb.toString());
     }
 
     private void decorateToolbarButtons() {
@@ -371,6 +466,7 @@ public class MainController {
         p.setProperty(CFG_DATA_MAX_ROWS, "100");
         p.setProperty(CFG_DATA_ALL_ROWS, "false");
         p.setProperty(CFG_IMPORT_DATA_ONLY, "false");
+        p.setProperty(CFG_IMPORT_OBJECT_TYPES, "");
         return p;
     }
 
@@ -561,7 +657,7 @@ public class MainController {
         operationInProgress = true;
         disableWhileBusy(true);
 
-        String t = tableName.trim().toUpperCase(Locale.ROOT);
+        String t = tableName.trim();
         Task<TableInfo> task = new Task<>() {
             @Override
             protected TableInfo call() throws Exception {
@@ -904,13 +1000,23 @@ public class MainController {
             showError("Import folder not set", "Please choose an import folder first.");
             return;
         }
+        EnumSet<DbObjectType> importTypes = collectImportObjectTypesForImport();
+        if (importTypes.isEmpty()) {
+            showError("No object types selected", "Select at least one object type to import (TABLE, VIEW, …).");
+            return;
+        }
         operationInProgress = true;
         final boolean dataOnly = importDataOnlyCheck != null && importDataOnlyCheck.isSelected();
         final Path importPath = importDir;
+        final EnumSet<DbObjectType> importTypesFinal = importTypes;
         clearLog();
         appendLog("[IMPORT] Root folder: " + importPath);
+        appendLog("[IMPORT] Object types: "
+                + String.join(", ", importTypesFinal.stream().map(DbObjectType::name).sorted().toList()));
         if (dataOnly) {
-            appendLog("[IMPORT] Data only: will skip table DDL, run other DDL, then data.");
+            appendLog("[IMPORT] Data only: skip table DDL; other DDL runs, then data (non-empty tables skipped for data).");
+        } else {
+            appendLog("[IMPORT] Table DDL skipped if table exists; data only loads into empty tables.");
         }
 
         Task<Path> task = new Task<>() {
@@ -918,13 +1024,6 @@ public class MainController {
             protected Path call() throws Exception {
                 updateMessage("Preparing import...");
                 updateProgress(-1, 1);
-                if (isCancelled()) {
-                    return importPath;
-                }
-                if (!dataOnly) {
-                    updateMessage("Checking schema is empty...");
-                    metadataService.requireSchemaEmptyForImport(connection);
-                }
                 if (isCancelled()) {
                     return importPath;
                 }
@@ -941,7 +1040,7 @@ public class MainController {
                     }
                     importService.importFromExportFolder(
                             connection, importPath,
-                            new ImportService.ImportOptions(dataOnly, this::isCancelled),
+                            new ImportService.ImportOptions(dataOnly, this::isCancelled, importTypesFinal),
                             MainController.this::appendLog);
                 } finally {
                     try {
@@ -1172,6 +1271,7 @@ public class MainController {
         if (importDataOnlyCheck != null) {
             config.setProperty(CFG_IMPORT_DATA_ONLY, Boolean.toString(importDataOnlyCheck.isSelected()));
         }
+        saveImportObjectTypesToConfig();
         config.setProperty(CFG_DATA_ALL_ROWS, Boolean.toString(exportAllDataCheck.isSelected()));
         config.setProperty(CFG_DATA_MAX_ROWS, Integer.toString(maxDataRowsSpinner.getValue()));
         ConfigUtil.save(config);

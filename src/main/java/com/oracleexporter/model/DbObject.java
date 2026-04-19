@@ -1,7 +1,5 @@
 package com.oracleexporter.model;
 
-import java.util.Locale;
-
 public final class DbObject {
     private final DbObjectType type;
     private final String name;
@@ -16,10 +14,11 @@ public final class DbObject {
         if (type == null) throw new IllegalArgumentException("type is null");
         if (name == null || name.isBlank()) throw new IllegalArgumentException("name is blank");
         this.type = type;
-        this.name = name.trim().toUpperCase(Locale.ROOT);
+        // Preserve case: Oracle quoted identifiers (e.g. "MyTable") are case-sensitive in data dictionary.
+        this.name = name.trim();
         this.subObjectName = (subObjectName == null || subObjectName.isBlank())
                 ? null
-                : subObjectName.trim().toUpperCase(Locale.ROOT);
+                : subObjectName.trim();
     }
 
     public DbObjectType getType() {

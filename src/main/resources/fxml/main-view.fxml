@@ -119,6 +119,12 @@
                         <CheckBox fx:id="importDataOnlyCheck" text="Data only: skip table DDL (existing tables)"/>
                         <Region HBox.hgrow="ALWAYS"/>
                     </HBox>
+                    <VBox spacing="6">
+                        <Label text="Import: which object types (folders under export root)" styleClass="field-label-inline"/>
+                        <ScrollPane fitToWidth="true" maxHeight="100" minHeight="72" styleClass="import-types-scroll">
+                            <FlowPane fx:id="importTypesFlowPane" hgap="12" vgap="6"/>
+                        </ScrollPane>
+                    </VBox>
                     <TableView fx:id="columnTable" VBox.vgrow="ALWAYS" minHeight="120">
                         <columns>
                             <TableColumn fx:id="colName" text="Column"/>

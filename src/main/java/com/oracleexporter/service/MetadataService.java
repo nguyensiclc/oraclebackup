@@ -205,7 +205,8 @@ public class MetadataService {
             throw new IllegalArgumentException("tableName is blank");
         }
 
-        String t = normalized.toUpperCase(Locale.ROOT);
+        // Must match USER_TABLES.TABLE_NAME exactly (quoted identifiers are case-sensitive).
+        String t = normalized;
         Set<String> pkCols = loadPrimaryKeyColumns(connection, t);
 
         TableInfo tableInfo = new TableInfo(t);
@@ -267,7 +268,7 @@ public class MetadataService {
         return tableInfo;
     }
 
-    private Set<String> loadPrimaryKeyColumns(Connection connection, String tableNameUpper) throws SQLException {
+    private Set<String> loadPrimaryKeyColumns(Connection connection, String tableName) throws SQLException {
         String sql = """
                 SELECT acc.COLUMN_NAME
                 FROM USER_CONSTRAINTS ac
@@ -279,7 +280,7 @@ public class MetadataService {
 
         Set<String> cols = new HashSet<>();
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
-            ps.setString(1, tableNameUpper);
+            ps.setString(1, tableName);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String c = rs.getString("COLUMN_NAME");

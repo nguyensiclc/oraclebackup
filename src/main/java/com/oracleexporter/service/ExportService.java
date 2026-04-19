@@ -68,7 +68,7 @@ public class ExportService {
         if (connection == null) throw new IllegalArgumentException("connection is null");
         if (tableName == null || tableName.isBlank()) throw new IllegalArgumentException("tableName is blank");
 
-        String t = tableName.trim().toUpperCase(Locale.ROOT);
+        String t = tableName.trim();
         StringBuilder sql = new StringBuilder("SELECT * FROM ").append(quoteIdent(t));
         boolean limited = maxRows != null && maxRows > 0;
         if (limited) {
