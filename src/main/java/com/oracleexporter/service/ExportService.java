@@ -96,7 +96,7 @@ public class ExportService {
                 for (int i = 1; i <= colCount; i++) {
                     if (i > 1) w.write(", ");
                     int jdbcType = md.getColumnType(i);
-                    w.write(toSqlLiteral(rs, i, jdbcType));
+                    w.write(toSqlLiteral(rs, i, jdbcType, md.getColumnTypeName(i)));
                 }
                 w.write(");");
                 w.newLine();
@@ -223,9 +223,18 @@ public class ExportService {
         return sb.toString();
     }
 
-    private static String toSqlLiteral(ResultSet rs, int index, int jdbcType) throws SQLException, IOException {
+    private static String toSqlLiteral(ResultSet rs, int index, int jdbcType, String columnTypeName)
+            throws SQLException, IOException {
         Object value = rs.getObject(index);
         if (value == null) return "NULL";
+
+        // DATE / TIME / TIMESTAMP: use getTimestamp — Oracle getObject often returns oracle.sql.TIMESTAMP,
+        // which is not instanceof java.sql.Timestamp, so literals must not fall through to quoted strings (ORA-01843).
+        if (isJdbcTemporalType(jdbcType, columnTypeName)) {
+            Timestamp ts = rs.getTimestamp(index);
+            if (ts == null) return "NULL";
+            return toDateLiteral(ts.toLocalDateTime());
+        }
 
         // Numbers
         if (value instanceof Number n) {
@@ -237,14 +246,7 @@ public class ExportService {
             return b ? "1" : "0";
         }
 
-        // Date/time: TO_DATE with YYYY-MM-DD HH24:MI:SS for DATE and TIMESTAMP columns
-        if (jdbcType == Types.DATE && value instanceof java.sql.Date d) {
-            LocalDateTime ldt = d.toLocalDate().atStartOfDay();
-            return toDateLiteral(ldt);
-        }
-        if ((jdbcType == Types.TIMESTAMP || jdbcType == Types.TIMESTAMP_WITH_TIMEZONE) && value instanceof Timestamp ts) {
-            return toDateLiteral(ts.toLocalDateTime());
-        }
+        // Other drivers may return java.time types for temporal columns
         if (value instanceof OffsetDateTime odt) {
             return toDateLiteral(odt.toLocalDateTime());
         }
@@ -253,6 +255,12 @@ public class ExportService {
         }
         if (value instanceof LocalDateTime ldt) {
             return toDateLiteral(ldt);
+        }
+        if (value instanceof java.sql.Date d) {
+            return toDateLiteral(d.toLocalDate().atStartOfDay());
+        }
+        if (value instanceof Timestamp ts) {
+            return toDateLiteral(ts.toLocalDateTime());
         }
 
         // RAW/BLOB -> hextoraw
@@ -275,6 +283,24 @@ public class ExportService {
     private static String toDateLiteral(LocalDateTime ldt) {
         LocalDateTime t = ldt.truncatedTo(ChronoUnit.SECONDS);
         return "TO_DATE('" + DATE_TIME_FMT.format(t) + "', '" + ORACLE_DATE_TIME_MASK + "')";
+    }
+
+    /**
+     * JDBC type codes for temporal columns, plus Oracle type names when the driver reports {@link Types#OTHER}.
+     */
+    private static boolean isJdbcTemporalType(int jdbcType, String columnTypeName) {
+        if (jdbcType == Types.DATE
+                || jdbcType == Types.TIME
+                || jdbcType == Types.TIME_WITH_TIMEZONE
+                || jdbcType == Types.TIMESTAMP
+                || jdbcType == Types.TIMESTAMP_WITH_TIMEZONE) {
+            return true;
+        }
+        if (columnTypeName == null || columnTypeName.isBlank()) {
+            return false;
+        }
+        String u = columnTypeName.toUpperCase(Locale.ROOT);
+        return u.contains("TIMESTAMP") || "DATE".equals(u) || u.contains("TIME ZONE") || u.contains("TIMESTAMPTZ");
     }
 
     private static String toHex(byte[] bytes) {
