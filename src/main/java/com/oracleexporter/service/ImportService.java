@@ -1,9 +1,11 @@
 package com.oracleexporter.service;
 
 import com.oracleexporter.model.DbObjectType;
+import com.oracleexporter.util.ViewDdlUtil;
 import com.oracleexporter.util.SqlScriptRunner;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -50,16 +52,25 @@ public class ImportService {
         private final BooleanSupplier cancelled;
         /** {@code null} = import every type in {@link #DDL_IMPORT_ORDER} (legacy). */
         private final Set<DbObjectType> importTypes;
+        private final boolean stripQuotedOwnerFromViewDdl;
 
         public ImportOptions(boolean skipTableDdl, BooleanSupplier cancelled) {
-            this(skipTableDdl, cancelled, null);
+            this(skipTableDdl, cancelled, null, false);
         }
 
         public ImportOptions(boolean skipTableDdl, BooleanSupplier cancelled, Set<DbObjectType> importTypes) {
+            this(skipTableDdl, cancelled, importTypes, false);
+        }
+
+        public ImportOptions(
+                boolean skipTableDdl,
+                BooleanSupplier cancelled,
+                Set<DbObjectType> importTypes,
+                boolean stripQuotedOwnerFromViewDdl) {
             this.skipTableDdl = skipTableDdl;
             this.cancelled = cancelled;
-            // null = import all types (legacy); empty or non-empty EnumSet = explicit selection
             this.importTypes = importTypes == null ? null : EnumSet.copyOf(importTypes);
+            this.stripQuotedOwnerFromViewDdl = stripQuotedOwnerFromViewDdl;
         }
 
         public boolean isSkipTableDdl() {
@@ -72,11 +83,26 @@ public class ImportService {
             }
             return importTypes.contains(type);
         }
+
+        public boolean isStripQuotedOwnerFromViewDdl() {
+            return stripQuotedOwnerFromViewDdl;
+        }
+    }
+
+    private static void runDdlFile(Connection connection, Path f, BooleanSupplier cancelled, ImportOptions options)
+            throws IOException, SQLException {
+        if (!options.isStripQuotedOwnerFromViewDdl()) {
+            SqlScriptRunner.runFile(connection, f, cancelled);
+            return;
+        }
+        String sql = Files.readString(f, StandardCharsets.UTF_8);
+        sql = ViewDdlUtil.stripQuotedOwnerFromCreateViewDdl(sql);
+        SqlScriptRunner.runSql(connection, sql, cancelled);
     }
 
     public void importFromExportFolder(Connection connection, Path exportRoot, Consumer<String> logger)
             throws IOException, SQLException {
-        importFromExportFolder(connection, exportRoot, new ImportOptions(false, null, null), logger);
+        importFromExportFolder(connection, exportRoot, new ImportOptions(false, null, null, false), logger);
     }
 
     public void importFromExportFolder(
@@ -113,7 +139,8 @@ public class ImportService {
                                 false,
                                 cancelled,
                                 true,
-                                false);
+                                false,
+                                options);
                     }
 
                     Path tableData = exportRoot.resolve(typeFolder(DbObjectType.TABLE)).resolve("data");
@@ -126,7 +153,8 @@ public class ImportService {
                                 true,
                                 cancelled,
                                 false,
-                                true);
+                                true,
+                                options);
                     }
                 } else {
                     log.accept("[DDL] Importing " + t.name() + " DDL...");
@@ -137,7 +165,8 @@ public class ImportService {
                             false,
                             cancelled,
                             false,
-                            false);
+                            false,
+                            options);
                 }
             } catch (IOException ex) {
                 log.accept("[IMPORT][FAIL] " + t.name() + " :: " + safeIoError(ex));
@@ -161,7 +190,8 @@ public class ImportService {
             boolean isData,
             BooleanSupplier cancelled,
             boolean skipTableDdlIfExists,
-            boolean skipDataIfTableNotEmpty)
+            boolean skipDataIfTableNotEmpty,
+            ImportOptions importOptions)
             throws IOException, SQLException {
         if (!Files.isDirectory(dir)) return;
         if (isCancelled(cancelled)) {
@@ -231,7 +261,7 @@ public class ImportService {
                             continue;
                         }
                         log.accept("[DDL] " + objName + " ...");
-                        SqlScriptRunner.runFile(connection, f, cancelled);
+                        runDdlFile(connection, f, cancelled, importOptions);
                         log.accept("[DDL][OK] " + objName);
                     } catch (CancellationException e) {
                         throw e;

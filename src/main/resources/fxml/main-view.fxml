@@ -119,6 +119,10 @@
                         <CheckBox fx:id="importDataOnlyCheck" text="Data only: skip table DDL (existing tables)"/>
                         <Region HBox.hgrow="ALWAYS"/>
                     </HBox>
+                    <HBox spacing="8" alignment="CENTER_LEFT">
+                        <CheckBox fx:id="ddlViewOmitOwnerCheck" text="VIEW / MVIEW: omit owner in DDL (create in current schema)"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                    </HBox>
                     <VBox spacing="6">
                         <Label text="Import: which object types (folders under export root)" styleClass="field-label-inline"/>
                         <ScrollPane fitToWidth="true" maxHeight="100" minHeight="72" styleClass="import-types-scroll">

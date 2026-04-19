@@ -9,6 +9,7 @@ import com.oracleexporter.service.ImportService;
 import com.oracleexporter.service.MetadataService;
 import com.oracleexporter.util.ConfigUtil;
 import com.oracleexporter.util.DatabaseUtil;
+import com.oracleexporter.util.ViewDdlUtil;
 import com.oracleexporter.util.SavedCredentials;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleBooleanProperty;
@@ -58,6 +59,8 @@ public class MainController {
     private static final String CFG_IMPORT_DATA_ONLY = "import.dataOnly";
     /** Comma-separated {@link DbObjectType} names to import; empty = all types. */
     private static final String CFG_IMPORT_OBJECT_TYPES = "import.objectTypes";
+    /** Export/import: strip {@code "OWNER"."NAME"} to {@code "NAME"} on CREATE VIEW / MVIEW headers. */
+    private static final String CFG_DDL_VIEW_OMIT_OWNER = "export.ddl.viewOmitOwner";
 
     private static final DateTimeFormatter EXPORT_TS_FMT = DateTimeFormatter.ofPattern("dd_MM_yyyy_HH_mm");
 
@@ -92,6 +95,7 @@ public class MainController {
     @FXML private CheckBox exportAllDataCheck;
     @FXML private CheckBox importDataOnlyCheck;
     @FXML private FlowPane importTypesFlowPane;
+    @FXML private CheckBox ddlViewOmitOwnerCheck;
     @FXML private Button loadPreviewButton;
     @FXML private Button exportButton;
     @FXML private Button exportAllButton;
@@ -151,6 +155,9 @@ public class MainController {
         });
         if (importDataOnlyCheck != null) {
             importDataOnlyCheck.selectedProperty().addListener((obs, o, n) -> saveFieldsToConfig());
+        }
+        if (ddlViewOmitOwnerCheck != null) {
+            ddlViewOmitOwnerCheck.selectedProperty().addListener((obs, o, n) -> saveFieldsToConfig());
         }
         maxDataRowsSpinner.valueProperty().addListener((obs, o, n) -> saveFieldsToConfig());
 
@@ -295,6 +302,17 @@ public class MainController {
             }
         }
         config.setProperty(CFG_IMPORT_OBJECT_TYPES, sb.toString());
+    }
+
+    /** Optionally strip quoted owner on VIEW / MATERIALIZED VIEW DDL for current-schema create. */
+    private String maybeTransformViewDdl(String ddl, DbObjectType type) {
+        if (ddl == null || ddlViewOmitOwnerCheck == null || !ddlViewOmitOwnerCheck.isSelected()) {
+            return ddl;
+        }
+        if (type != DbObjectType.VIEW && type != DbObjectType.MATERIALIZED_VIEW) {
+            return ddl;
+        }
+        return ViewDdlUtil.stripQuotedOwnerFromCreateViewDdl(ddl);
     }
 
     private void decorateToolbarButtons() {
@@ -467,6 +485,7 @@ public class MainController {
         p.setProperty(CFG_DATA_ALL_ROWS, "false");
         p.setProperty(CFG_IMPORT_DATA_ONLY, "false");
         p.setProperty(CFG_IMPORT_OBJECT_TYPES, "");
+        p.setProperty(CFG_DDL_VIEW_OMIT_OWNER, "false");
         return p;
     }
 
@@ -776,6 +795,7 @@ public class MainController {
                     }
                     try {
                         String ddl = metadataService.loadObjectDdl(connection, connectedSchema, exportObj);
+                        ddl = maybeTransformViewDdl(ddl, exportObj.getType());
                         if (isCancelled()) {
                             return exportRoot;
                         }
@@ -930,6 +950,7 @@ public class MainController {
                                 break;
                             }
                             String ddl = metadataService.loadObjectDdl(connection, connectedSchema, obj);
+                            ddl = maybeTransformViewDdl(ddl, obj.getType());
                             if (isCancelled()) {
                                 break;
                             }
@@ -1040,7 +1061,11 @@ public class MainController {
                     }
                     importService.importFromExportFolder(
                             connection, importPath,
-                            new ImportService.ImportOptions(dataOnly, this::isCancelled, importTypesFinal),
+                            new ImportService.ImportOptions(
+                                    dataOnly,
+                                    this::isCancelled,
+                                    importTypesFinal,
+                                    ddlViewOmitOwnerCheck != null && ddlViewOmitOwnerCheck.isSelected()),
                             MainController.this::appendLog);
                 } finally {
                     try {
@@ -1247,6 +1272,9 @@ public class MainController {
         if (importDataOnlyCheck != null) {
             importDataOnlyCheck.setSelected(Boolean.parseBoolean(config.getProperty(CFG_IMPORT_DATA_ONLY, "false")));
         }
+        if (ddlViewOmitOwnerCheck != null) {
+            ddlViewOmitOwnerCheck.setSelected(Boolean.parseBoolean(config.getProperty(CFG_DDL_VIEW_OMIT_OWNER, "false")));
+        }
     }
 
     /**
@@ -1272,6 +1300,9 @@ public class MainController {
             config.setProperty(CFG_IMPORT_DATA_ONLY, Boolean.toString(importDataOnlyCheck.isSelected()));
         }
         saveImportObjectTypesToConfig();
+        if (ddlViewOmitOwnerCheck != null) {
+            config.setProperty(CFG_DDL_VIEW_OMIT_OWNER, Boolean.toString(ddlViewOmitOwnerCheck.isSelected()));
+        }
         config.setProperty(CFG_DATA_ALL_ROWS, Boolean.toString(exportAllDataCheck.isSelected()));
         config.setProperty(CFG_DATA_MAX_ROWS, Integer.toString(maxDataRowsSpinner.getValue()));
         ConfigUtil.save(config);
